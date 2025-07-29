@@ -13,5 +13,6 @@
     "inquirer": "^12.8.2"
   },
   "author": "Sayangmu 💕",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": "Reinvy/rakitin"
 }
