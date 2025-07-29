@@ -1,0 +1,17 @@
+{
+  "name": "rakitin",
+  "version": "1.0.0",
+  "description": "CLI rakitin buat generate boilerplate modular backend 😎",
+  "main": "index.js",
+  "bin": {
+    "rakitin": "./bin/rakitin.js"
+  },
+  "scripts": {
+    "start": "node bin/rakitin.js"
+  },
+  "dependencies": {
+    "inquirer": "^12.8.2"
+  },
+  "author": "Sayangmu 💕",
+  "license": "MIT"
+}
