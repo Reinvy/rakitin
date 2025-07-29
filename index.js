@@ -4,11 +4,8 @@ const generateMiddleware = require("./lib/generator/middleware/middleware");
 const generateUtil = require("./lib/generator/util/util");
 const generateConfig = require("./lib/generator/config/config");
 const integrateRouter = require("./lib/generator/router/router");
-const { ensureBaseStructure } = require("./lib/utils");
 
 async function main() {
-  ensureBaseStructure();
-
   const { feature } = await mainPrompt();
 
   switch (feature) {
