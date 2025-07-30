@@ -39,3 +39,4 @@ coverage/
 # Additional Ignore
 public/uploads/
 app
+prisma
