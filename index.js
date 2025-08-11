@@ -1,15 +1,11 @@
-#!/usr/bin/env node
 const { mainPrompt } = require("./lib/prompt");
 const generateModule = require("./lib/generator/module/module");
-const generateMiddleware = require("./lib/generator/middleware");
-const generateUtil = require("./lib/generator/util");
-const generateConfig = require("./lib/generator/config");
-const integrateRouter = require("./lib/generator/router");
-const { ensureBaseStructure } = require("./lib/utils");
+const generateMiddleware = require("./lib/generator/middleware/middleware");
+const generateUtil = require("./lib/generator/util/util");
+const generateConfig = require("./lib/generator/config/config");
+const integrateRouter = require("./lib/generator/router/router");
 
 async function main() {
-  ensureBaseStructure();
-
   const { feature } = await mainPrompt();
 
   switch (feature) {
