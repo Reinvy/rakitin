@@ -40,3 +40,6 @@ coverage/
 public/uploads/
 app
 prisma
+/lib/generated/prisma
+
+/lib/generated/prisma
