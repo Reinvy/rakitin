@@ -50,7 +50,7 @@
     * **regex**: Fungsi utilitas _regex_ (misalnya, `matchAll`, `escape`).
     * **time**: Fungsi utilitas terkait waktu (misalnya, `sleep`, `now`).
     * **Config**: Fitur ini membantu dalam membuat file konfigurasi standar untuk berbagai kebutuhan aplikasi seperti database, JWT, CORS, logger, mailer, cloud storage, payment gateway, Redis, Socket.IO, dan environment.
-    * **Integrasi Router Utama**: Fitur ini mempermudah integrasi _router_ modul yang baru dibuat ke dalam _router_ utama aplikasi, mengurangi kerja manual. Mendukung integrasi otomatis dan manual dengan pilihan arsitektur modular atau simple.
+    * **Integrasi Router Utama**: Fitur ini mempermudah integrasi _router_ modul yang baru dibuat ke dalam _router_ utama aplikasi, mengurangi kerja manual. Mendukung integrasi otomatis dan manual dengan pilihan arsitektur modular atau simple. Untuk dokumentasi lengkap, lihat [Integrasi Router Utama](docs/router-integration.md).
 
 ### Instalasi
 
@@ -230,7 +230,7 @@ Author: Reinvy
       * **regex**: Regex utility functions (e.g., `matchAll`, `escape`).
       * **time**: Time-related utility functions (e.g., `sleep`, `now`).
       * **Config**: This feature assists in creating standard configuration files for various application needs such as database, JWT, CORS, logger, mailer, cloud storage, payment gateway, Redis, Socket.IO, and environment.
-      * **Main Router Integration**: This feature simplifies the integration of newly created module routers into the application's main router, reducing manual effort. Supports both automatic and manual integration with modular or simple architecture options.
+      * **Main Router Integration**: This feature simplifies the integration of newly created module routers into the application's main router, reducing manual effort. Supports both automatic and manual integration with modular or simple architecture options. For complete documentation, see [Main Router Integration](docs/router-integration.md).
 
 ### Installation
 

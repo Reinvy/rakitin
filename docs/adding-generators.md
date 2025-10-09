@@ -853,3 +853,125 @@ Follow consistent naming conventions:
 - Function names: `camelCase`
 - Class names: `PascalCase`
 - Variable names: `camelCase`
+
+### Router Generator Integration
+
+#### Overview
+
+The Router Integration generator is a special component in rakitin that helps integrate module routers into the main application router. This generator uses several shared components to provide robust functionality:
+
+- **PathResolver** (`lib/generator/shared/path-resolver.js`): Handles path resolution for different module architectures
+- **FileValidator** (`lib/generator/shared/file-validator.js`): Validates the existence of required files before integration
+- **ErrorHandler** (`lib/generator/shared/error-handler.js`): Provides consistent error handling throughout the integration process
+- **IntegrationHelper** (`lib/generator/shared/integration-helper.js`): Contains helper functions for router integration
+
+#### Key Components
+
+##### PathResolver
+
+The PathResolver class provides methods to resolve paths for different module architectures:
+
+```javascript
+// Get import path for modular router
+PathResolver.getModularRouterImportPath(moduleName);
+
+// Get import path for simple controller
+PathResolver.getSimpleControllerImportPath(moduleName);
+
+// Normalize module name to kebab-case
+PathResolver.normalizeModuleName(moduleName);
+```
+
+##### FileValidator
+
+The FileValidator class provides validation methods:
+
+```javascript
+// Validate router integration
+FileValidator.validateRouterIntegration(modules, basePath, architecture);
+
+// Validate modular router file
+FileValidator.validateModularRouterFile(moduleName, basePath);
+
+// Validate simple controller file
+FileValidator.validateSimpleControllerFile(moduleName, basePath);
+```
+
+##### IntegrationHelper
+
+The IntegrationHelper class provides helper functions for router integration:
+
+```javascript
+// Get main router path based on location
+IntegrationHelper.getMainRouterPath(location, basePath);
+
+// Create main router content
+IntegrationHelper.createMainRouterContent(modules, architecture, middlewares);
+
+// Update existing router with new module
+IntegrationHelper.updateExistingRouter(routerPath, moduleName, architecture);
+
+// Ask user for router preferences
+IntegrationHelper.askRouterLocation();
+IntegrationHelper.askRouterArchitecture();
+IntegrationHelper.askGlobalMiddleware();
+```
+
+#### Adding Router Integration to a New Generator
+
+If you're creating a new generator that needs router integration, you can use these shared components:
+
+1. **Import the required components**:
+```javascript
+const PathResolver = require("../shared/path-resolver");
+const FileValidator = require("../shared/file-validator");
+const ErrorHandler = require("../shared/error-handler");
+const IntegrationHelper = require("../shared/integration-helper");
+```
+
+2. **Validate before integration**:
+```javascript
+const validation = FileValidator.validateRouterIntegration(
+  modules,
+  basePath,
+  architecture
+);
+
+if (!validation.isValid) {
+  ErrorHandler.handleRouterIntegrationErrors(
+    validation.errors,
+    modules,
+    "Router Integration Validation"
+  );
+  return;
+}
+```
+
+3. **Create router content**:
+```javascript
+const content = IntegrationHelper.createMainRouterContent(
+  modules,
+  architecture,
+  middlewares
+);
+```
+
+4. **Handle file operations**:
+```javascript
+try {
+  fs.writeFileSync(routerPath, content, "utf8");
+  console.log(`✅ Router successfully created at ${routerPath}`);
+} catch (error) {
+  ErrorHandler.handleFileCreationError(routerPath, error, "Router Creation");
+}
+```
+
+#### Best Practices for Router Integration
+
+1. **Always validate files before integration**: Use FileValidator to ensure all required files exist
+2. **Use consistent error handling**: Use ErrorHandler for consistent error messages
+3. **Normalize module names**: Use PathResolver.normalizeModuleName() for consistent naming
+4. **Handle different architectures**: Support both modular and simple architectures
+5. **Provide clear feedback**: Inform users about the integration process and any issues
+
+For more detailed information about router integration, see the [Router Integration Documentation](router-integration.md).
