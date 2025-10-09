@@ -3,7 +3,7 @@ const generateModule = require("./lib/generator/module/module");
 const generateMiddleware = require("./lib/generator/middleware/middleware");
 const generateUtil = require("./lib/generator/util/util");
 const generateConfig = require("./lib/generator/config/config");
-const integrateRouter = require("./lib/generator/router/router");
+const { integrateRouter } = require("./lib/generator/router/router");
 
 async function main() {
   const { feature } = await mainPrompt();
@@ -17,7 +17,7 @@ async function main() {
       return generateUtil();
     case "Config":
       return generateConfig();
-    case "Integrasi Router Utama":
+    case "Router Integration":
       return integrateRouter();
     default:
       console.log("Batal.");
