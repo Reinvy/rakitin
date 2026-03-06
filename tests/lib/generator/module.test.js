@@ -1,19 +1,19 @@
 const fs = require('fs-extra');
 const path = require('path');
 const inquirer = require('inquirer');
-const generateModule = require('../../lib/generator/module/module');
+const generateModule = require('../../../lib/generator/module/module');
 
 // Mock dependencies
 jest.mock('inquirer');
-jest.mock('../../lib/generator/module/arch/arch');
-jest.mock('../../lib/generator/module/orm/orm');
-jest.mock('../../lib/installer');
-jest.mock('../../lib/generator/shared/validation-utils');
+jest.mock('../../../lib/generator/module/arch/arch');
+jest.mock('../../../lib/generator/module/orm/orm');
+jest.mock('../../../lib/installer');
+jest.mock('../../../lib/generator/shared/validation-utils');
 
-const { simpleArch, modularArch } = require('../../lib/generator/module/arch/arch');
-const { prismaORM, sequelizeORM, mongooseORM, typeormORM } = require('../../lib/generator/module/orm/orm');
-const { installIfNeeded, installOrmPackages } = require('../../lib/installer');
-const { validateModuleName, validateOrm, validateArchitecture, handleError, createErrorMessage } = require('../../lib/generator/shared/validation-utils');
+const { simpleArch, modularArch } = require('../../../lib/generator/module/arch/arch');
+const { prismaORM, sequelizeORM, mongooseORM, typeormORM } = require('../../../lib/generator/module/orm/orm');
+const { installIfNeeded, installOrmPackages } = require('../../../lib/installer');
+const { validateModuleName, validateOrm, validateArchitecture, handleError, createErrorMessage } = require('../../../lib/generator/shared/validation-utils');
 
 describe('Module Generator', () => {
   beforeEach(() => {
@@ -41,7 +41,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Simple',
       useORM: 'Yes',
-      orm: 'Prisma'
+      orm: 'Prisma',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -80,6 +83,28 @@ describe('Module Generator', () => {
         message: 'Pilih ORM/Database:',
         choices: ['Prisma', 'Sequelize', 'Mongoose', 'TypeORM'],
         when: expect.any(Function)
+      },
+      {
+        type: 'confirm',
+        name: 'autoIntegrateRouter',
+        message: 'Apakah ingin secara otomatis mengintegrasikan modul ini ke router utama?',
+        default: false
+      },
+      {
+        name: 'routerLocation',
+        value: 'root',
+        when: expect.any(Function)
+      },
+      {
+        type: 'list',
+        name: 'routerArchitecture',
+        message: 'Pilih arsitektur router:',
+        choices: [
+          { name: 'Modular (setiap modul memiliki router terpisah)', value: 'modular' },
+          { name: 'Simple (semua route dalam satu file)', value: 'simple' }
+        ],
+        default: 'modular',
+        when: expect.any(Function)
       }
     ]);
   });
@@ -90,7 +115,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Simple',
       useORM: 'Yes',
-      orm: 'Prisma'
+      orm: 'Prisma',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -152,7 +180,10 @@ describe('Module Generator', () => {
     const mockPrompt = jest.fn().mockResolvedValue({
       moduleName: 'test-module',
       architecture: 'Simple',
-      useORM: 'No'
+      useORM: 'No',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -171,7 +202,10 @@ describe('Module Generator', () => {
     const mockPrompt = jest.fn().mockResolvedValue({
       moduleName: 'test-module',
       architecture: 'Simple',
-      useORM: 'No'
+      useORM: 'No',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -190,7 +224,10 @@ describe('Module Generator', () => {
     const mockPrompt = jest.fn().mockResolvedValue({
       moduleName: 'test-module',
       architecture: 'Simple',
-      useORM: 'No'
+      useORM: 'No',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -207,7 +244,10 @@ describe('Module Generator', () => {
     const mockPrompt = jest.fn().mockResolvedValue({
       moduleName: 'test-module',
       architecture: 'Modular',
-      useORM: 'No'
+      useORM: 'No',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -225,7 +265,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Simple',
       useORM: 'Yes',
-      orm: 'Prisma'
+      orm: 'Prisma',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -249,7 +292,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Simple',
       useORM: 'Yes',
-      orm: 'Sequelize'
+      orm: 'Sequelize',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -273,7 +319,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Modular',
       useORM: 'Yes',
-      orm: 'Mongoose'
+      orm: 'Mongoose',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -297,7 +346,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Modular',
       useORM: 'Yes',
-      orm: 'TypeORM'
+      orm: 'TypeORM',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -321,7 +373,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Simple',
       useORM: 'Yes',
-      orm: 'Prisma'
+      orm: 'Prisma',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -341,7 +396,10 @@ describe('Module Generator', () => {
     const mockPrompt = jest.fn().mockResolvedValue({
       moduleName: 'test-module',
       architecture: 'Simple',
-      useORM: 'No'
+      useORM: 'No',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -363,7 +421,10 @@ describe('Module Generator', () => {
     const mockPrompt = jest.fn().mockResolvedValue({
       moduleName: 'test-module',
       architecture: 'Simple',
-      useORM: 'No'
+      useORM: 'No',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -379,7 +440,10 @@ describe('Module Generator', () => {
     const mockPrompt = jest.fn().mockResolvedValue({
       moduleName: 'test-module',
       architecture: 'Simple',
-      useORM: 'No'
+      useORM: 'No',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -396,7 +460,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Simple',
       useORM: 'Yes',
-      orm: 'Prisma'
+      orm: 'Prisma',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -409,7 +476,10 @@ describe('Module Generator', () => {
     const mockPrompt = jest.fn().mockResolvedValue({
       moduleName: 'test-module',
       architecture: 'Simple',
-      useORM: 'No'
+      useORM: 'No',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -434,7 +504,10 @@ describe('Module Generator', () => {
       moduleName: 'test-module',
       architecture: 'Simple',
       useORM: 'Yes',
-      orm: 'Prisma'
+      orm: 'Prisma',
+      autoIntegrateRouter: false,
+      routerLocation: 'root',
+      routerArchitecture: 'modular'
     });
     inquirer.default.prompt = mockPrompt;
     
@@ -455,4 +528,5 @@ describe('Module Generator', () => {
     // Verify handleError was called
     expect(handleError).toHaveBeenCalledWith('pembuatan modul', expect.any(Error));
   });
+
 });
