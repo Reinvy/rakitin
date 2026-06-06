@@ -4,6 +4,14 @@
 [![npm version](https://badge.fury.io/js/rakitin.svg)](https://badge.fury.io/js/rakitin)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## Fitur Status
+
+[![Module Generator](https://img.shields.io/badge/Module-Generator-brightgreen.svg)](#)
+[![Middleware Generator](https://img.shields.io/badge/Middleware-Generator-brightgreen.svg)](#)
+[![Util Generator](https://img.shields.io/badge/Util-Generator-brightgreen.svg)](#)
+[![Config Generator](https://img.shields.io/badge/Config-Generator-brightgreen.svg)](#)
+[![Router Integration](https://img.shields.io/badge/Router-Integration-brightgreen.svg)](#)
+
 ## 🇮🇩 Bahasa Indonesia
 
 ### Deskripsi Proyek
@@ -41,8 +49,8 @@
     * **validation**: Fungsi validasi dasar (misalnya, `isEmail`, `isUrl`).
     * **regex**: Fungsi utilitas _regex_ (misalnya, `matchAll`, `escape`).
     * **time**: Fungsi utilitas terkait waktu (misalnya, `sleep`, `now`).
-* **Config** (Dalam Pengembangan): Fitur ini akan membantu dalam membuat file konfigurasi standar untuk berbagai kebutuhan aplikasi.
-* **Integrasi Router Utama** (Dalam Pengembangan): Fitur ini akan mempermudah integrasi _router_ modul yang baru dibuat ke dalam _router_ utama aplikasi, mengurangi kerja manual.
+    * **Config**: Fitur ini membantu dalam membuat file konfigurasi standar untuk berbagai kebutuhan aplikasi seperti database, JWT, CORS, logger, mailer, cloud storage, payment gateway, Redis, Socket.IO, dan environment.
+    * **Integrasi Router Utama**: Fitur ini mempermudah integrasi _router_ modul yang baru dibuat ke dalam _router_ utama aplikasi, mengurangi kerja manual. Mendukung integrasi otomatis dan manual dengan pilihan arsitektur modular atau simple. Untuk dokumentasi lengkap, lihat [Integrasi Router Utama](docs/router-integration.md).
 
 ### Instalasi
 
@@ -142,13 +150,41 @@ Berikut adalah gambaran umum struktur proyek yang dibuat atau diinteraksi oleh `
 └── .gitignore            # File yang diabaikan oleh Git
 ```
 
+### Cara Berkontribusi
+
+Kami sangat menghargai kontribusi dari komunitas! Jika Anda ingin berkontribusi pada proyek **rakitin**, berikut adalah langkah-langkah yang dapat Anda ikuti:
+
+1.  **Fork** repositori ini
+2.  **Clone** fork Anda: `git clone https://github.com/username/rakitin.git`
+3.  **Buat branch baru** untuk fitur atau perbaikan Anda: `git checkout -b fitur-baru`
+4.  **Commit** perubahan Anda: `git commit -am 'Menambahkan fitur baru'`
+5.  **Push** ke branch: `git push origin fitur-baru`
+6.  **Buat Pull Request** ke repositori utama
+
+Untuk panduan kontribusi yang lebih detail, silakan lihat file [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Roadmap
+
+Rencana pengembangan **rakitin** untuk jangka pendek dan menengah:
+
+#### Jangka Pendek (1-3 bulan)
+- [ ] Menambahkan template untuk berbagai use case
+- [ ] Integrasi dengan database NoSQL (MongoDB, Redis)
+- [ ] Generator untuk file test
+- [ ] Implementasi basic CI/CD
+
+#### Jangka Menengah (3-6 bulan)
+- [ ] Plugin system untuk memungkinkan ekstensi
+- [ ] Generator untuk GraphQL API
+- [ ] Generator untuk WebSocket endpoints
+- [ ] Integrasi dengan Docker
+- [ ] Template untuk mikro services
+
+Untuk rencana pengembangan jangka panjang yang lengkap, silakan lihat file [rencana-pengembangan-jangka-panjang.md](rencana-pengembangan-jangka-panjang.md).
+
 ### Lisensi
 
 Proyek ini dilisensikan di bawah Lisensi MIT.
-
-### Kontribusi
-
-Kontribusi dipersilakan\! Jika Anda memiliki ide atau menemukan *bug*, silakan ajukan *issue* atau *pull request*.
 
 ### Kontak
 
@@ -193,8 +229,8 @@ Author: Reinvy
       * **validation**: Basic validation functions (e.g., `isEmail`, `isUrl`).
       * **regex**: Regex utility functions (e.g., `matchAll`, `escape`).
       * **time**: Time-related utility functions (e.g., `sleep`, `now`).
-  * **Config** (Under Development): This feature will assist in creating standard configuration files for various application needs.
-  * **Main Router Integration** (Under Development): This feature will simplify the integration of newly created module routers into the application's main router, reducing manual effort.
+      * **Config**: This feature assists in creating standard configuration files for various application needs such as database, JWT, CORS, logger, mailer, cloud storage, payment gateway, Redis, Socket.IO, and environment.
+      * **Main Router Integration**: This feature simplifies the integration of newly created module routers into the application's main router, reducing manual effort. Supports both automatic and manual integration with modular or simple architecture options. For complete documentation, see [Main Router Integration](docs/router-integration.md).
 
 ### Installation
 
@@ -294,13 +330,41 @@ Here's an overview of the project structure created or interacted with by `rakit
 └── .gitignore            # Files ignored by Git
 ```
 
+### How to Contribute
+
+We greatly appreciate contributions from the community! If you want to contribute to the **rakitin** project, here are the steps you can follow:
+
+1.  **Fork** this repository
+2.  **Clone** your fork: `git clone https://github.com/username/rakitin.git`
+3.  **Create a new branch** for your feature or fix: `git checkout -b new-feature`
+4.  **Commit** your changes: `git commit -am 'Add new feature'`
+5.  **Push** to the branch: `git push origin new-feature`
+6.  **Create a Pull Request** to the main repository
+
+For more detailed contribution guidelines, please see the [CONTRIBUTING.md](CONTRIBUTING.md) file.
+
+### Roadmap
+
+**rakitin** development plan for short and medium term:
+
+#### Short Term (1-3 months)
+- [ ] Adding templates for various use cases
+- [ ] Integration with NoSQL databases (MongoDB, Redis)
+- [ ] Test file generator
+- [ ] Basic CI/CD implementation
+
+#### Medium Term (3-6 months)
+- [ ] Plugin system to allow extensions
+- [ ] GraphQL API generator
+- [ ] WebSocket endpoints generator
+- [ ] Docker integration
+- [ ] Microservices templates
+
+For the complete long-term development plan, please see the [rencana-pengembangan-jangka-panjang.md](rencana-pengembangan-jangka-panjang.md) file.
+
 ### License
 
 This project is licensed under the MIT License.
-
-### Contributing
-
-Contributions are welcome\! If you have ideas or find bugs, please open an issue or submit a pull request.
 
 ### Contact
 

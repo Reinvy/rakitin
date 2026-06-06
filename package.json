@@ -1,18 +1,142 @@
 {
   "name": "rakitin",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "author": "Reinvy",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Reinvy/rakitin"
+  },
   "description": "CLI rakitin buat generate boilerplate modular backend 😎",
+  "keywords": [
+    "cli",
+    "generator",
+    "express",
+    "boilerplate",
+    "modular",
+    "backend",
+    "scaffolding",
+    "framework"
+  ],
   "main": "index.js",
+  "types": "types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./types/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./types/index.d.ts",
+        "default": "./index.js"
+      }
+    },
+    "./config": {
+      "import": "./dist/esm/config/index.js",
+      "require": "./lib/config/index.js"
+    },
+    "./utils": {
+      "import": "./dist/esm/utils/index.js",
+      "require": "./lib/utils/index.js"
+    },
+    "./utils/logger": {
+      "import": "./dist/esm/utils/logger.js",
+      "require": "./lib/utils/logger.js"
+    },
+    "./ui": {
+      "import": "./dist/esm/ui/index.js",
+      "require": "./lib/ui/index.js"
+    },
+    "./ui/progress": {
+      "import": "./dist/esm/ui/progress.js",
+      "require": "./lib/ui/progress.js"
+    },
+    "./template": {
+      "import": "./dist/esm/template/index.js",
+      "require": "./lib/template/index.js"
+    },
+    "./template/engine": {
+      "import": "./dist/esm/template/engine.js",
+      "require": "./lib/template/engine.js"
+    }
+  },
   "bin": {
     "rakitin": "./bin/rakitin.js"
   },
+  "files": [
+    "lib",
+    "bin",
+    "types",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "scripts": {
-    "start": "node bin/rakitin.js"
+    "start": "node bin/rakitin.js",
+    "dev": "node --watch bin/rakitin.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --watchAll=false",
+    "test:unit": "jest tests/unit",
+    "test:integration": "jest tests/integration",
+    "test:e2e": "jest tests/e2e",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "typecheck:strict": "tsc --noEmit --strict",
+    "build": "node build.config.js",
+    "build:cjs": "node build.config.js --cjs",
+    "build:esm": "node build.config.js --esm",
+    "build:clean": "node build.config.js --clean",
+    "prepublishOnly": "npm run build && npm run typecheck"
   },
   "dependencies": {
-    "inquirer": "^12.8.2"
+    "inquirer": "^12.8.2",
+    "yargs": "^17.7.2"
   },
-  "author": "Sayangmu 💕",
-  "license": "MIT",
-  "repository": "Reinvy/rakitin"
+  "devDependencies": {
+    "@jest/globals": "^30.2.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.0.0",
+    "fs-extra": "^11.3.2",
+    "jest": "^30.2.0",
+    "jest-mock": "^30.2.0",
+    "typescript": "^5.6.0"
+  },
+  "rakitin": {
+    "defaultArchitecture": "modular",
+    "defaultORM": "None",
+    "autoIntegrateRouter": true,
+    "defaultRouterArchitecture": "modular",
+    "logLevel": "info",
+    "enableColors": true,
+    "enableEmoji": true,
+    "packageManager": "npm",
+    "generateServiceLayer": true,
+    "generateValidationLayer": true,
+    "generateTestFiles": false,
+    "templateEngine": "ejs",
+    "includeComments": true,
+    "includeJSDoc": true,
+    "ormPackages": {
+      "Prisma": [
+        "@prisma/client",
+        "prisma"
+      ],
+      "Sequelize": [
+        "sequelize",
+        "mysql2"
+      ],
+      "Mongoose": [
+        "mongoose"
+      ],
+      "TypeORM": [
+        "typeorm",
+        "reflect-metadata"
+      ]
+    }
+  }
 }
