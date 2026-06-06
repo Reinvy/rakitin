@@ -1,7 +1,7 @@
 {
   "name": "rakitin",
-  "version": "1.0.0",
-  "author": "Sayangmu 💕",
+  "version": "1.1.0",
+  "author": "Reinvy",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -122,10 +122,21 @@
     "includeComments": true,
     "includeJSDoc": true,
     "ormPackages": {
-      "Prisma": ["@prisma/client", "prisma"],
-      "Sequelize": ["sequelize", "mysql2"],
-      "Mongoose": ["mongoose"],
-      "TypeORM": ["typeorm", "reflect-metadata"]
+      "Prisma": [
+        "@prisma/client",
+        "prisma"
+      ],
+      "Sequelize": [
+        "sequelize",
+        "mysql2"
+      ],
+      "Mongoose": [
+        "mongoose"
+      ],
+      "TypeORM": [
+        "typeorm",
+        "reflect-metadata"
+      ]
     }
   }
 }
