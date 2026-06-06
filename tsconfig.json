@@ -1,0 +1,55 @@
+{
+  "compilerOptions": {
+    /* Strict Mode - Maximum type safety */
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+
+    /* Error handling */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": false,
+
+    /* Module system */
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    /* Output configuration */
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist/types",
+    "rootDir": "./types",
+
+    /* Additional checks */
+    "forceConsistentCasingInFileNames": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "skipLibCheck": true,
+
+    /* Advanced options */
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowJs": false
+  },
+  "include": ["types/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "tests"
+  ],
+  "typeAcquisition": {
+    "enable": true
+  }
+}
