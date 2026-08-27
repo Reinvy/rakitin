@@ -32,7 +32,9 @@ describe("prismaORM", () => {
     await prismaORM("user-profile");
 
     const p = getPaths();
+    const baseFile = path.join(p.prismaPath, "base.prisma");
     const modelFile = path.join(p.prismaPath, "user-profile.prisma");
+    expect(fs.existsSync(baseFile)).toBe(true);
     expect(fs.existsSync(modelFile)).toBe(true);
     expect(fs.readFileSync(modelFile, "utf8")).toContain("model UserProfile");
 
@@ -41,6 +43,9 @@ describe("prismaORM", () => {
     const dbConfig = path.join(p.sharedPath, "config", "db.js");
     expect(fs.existsSync(dbConfig)).toBe(true);
     expect(fs.readFileSync(dbConfig, "utf8")).toContain("new PrismaClient");
+
+    // Prisma 7 config file
+    expect(fs.existsSync(path.join(process.cwd(), "prisma.config.js"))).toBe(true);
   });
 
   test("throws on missing module name", async () => {

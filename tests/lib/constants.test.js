@@ -23,7 +23,7 @@ describe("Constants", () => {
   });
 
   test("should have correct ORM paths", () => {
-    const expectedPrismaPath = path.join(process.cwd(), "prisma", "models");
+    const expectedPrismaPath = path.join(process.cwd(), "prisma", "schema");
     expect(constants.prismaPath).toBe(expectedPrismaPath);
 
     const expectedTypeormEntitiesPath = path.join(process.cwd(), "app", "modules");

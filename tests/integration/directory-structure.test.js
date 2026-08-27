@@ -63,7 +63,7 @@ describe("Directory Structure (real disk)", () => {
     expect(fs.existsSync(path.join(dir, "stock-level-report.controller.js"))).toBe(true);
   });
 
-  test("Prisma model files live under prisma/models and services reference shared db config", async () => {
+  test("Prisma model files live under prisma/schema and services reference shared db config", async () => {
     const { prismaORM } = require("../../lib/generator/module/orm/prisma.orm");
     const childProc = require("child_process");
     jest.spyOn(childProc, "execSync").mockImplementation(() => "");
@@ -71,6 +71,7 @@ describe("Directory Structure (real disk)", () => {
     await prismaORM("audit-log");
 
     const p = getPaths();
+    expect(fs.existsSync(path.join(p.prismaPath, "base.prisma"))).toBe(true);
     expect(fs.existsSync(path.join(p.prismaPath, "audit-log.prisma"))).toBe(true);
     expect(fs.existsSync(path.join(p.sharedPath, "config", "db.js"))).toBe(true);
   });
