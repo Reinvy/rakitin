@@ -77,6 +77,23 @@ describe("Safety Layer", () => {
       expect(res.written).toBe(true);
       expect(fs.readFileSync(target, "utf8")).toBe("b");
     });
+
+    test("REGRESSION: ensureDir does NOT leak folders during dry-run", () => {
+      const utils = require("../../lib/utils");
+      safety.beginPlan();
+
+      const dir = path.join(global.tempDir, "leak-guard", "nested");
+      utils.ensureDir(dir);
+
+      // Planned, never created
+      expect(fs.existsSync(dir)).toBe(false);
+      expect(safety.getPlan()).toContainEqual({ op: "mkdir", path: dir });
+
+      // Leaving dry-run makes it real again
+      safety.setDryRun(false);
+      utils.ensureDir(dir);
+      expect(fs.existsSync(dir)).toBe(true);
+    });
   });
 
   test("overwriteWithBackup preserves previous version as .bak", () => {
