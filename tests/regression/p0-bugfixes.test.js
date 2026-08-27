@@ -70,7 +70,7 @@ describe("Bugfix regressions: generated code must be valid JavaScript", () => {
       const code = generateServiceCode("User Profile", "Sequelize", "Modular");
       assertParses(code);
       expect(code).toContain(
-        'const UserProfile = require("../../models/user-profile.model")'
+        'const UserProfile = require("../models/user-profile.model")'
       );
       expect(code).not.toContain("const { userProfile }");
     });
@@ -78,7 +78,7 @@ describe("Bugfix regressions: generated code must be valid JavaScript", () => {
     test("Mongoose service requires the kebab-case model file", () => {
       const code = generateServiceCode("User Profile", "Mongoose", "Modular");
       assertParses(code);
-      expect(code).toContain("../../models/user-profile.model");
+      expect(code).toContain("../models/user-profile.model");
     });
   });
 
@@ -150,7 +150,11 @@ describe("Bugfix regressions: generated code must be valid JavaScript", () => {
 
       const files = fs.readdirSync(moduleDir).sort();
       // B(old): twin camelCase controller with dropped schema - removed
-      expect(files).toEqual(["user-profile.controller.js", "user-profile.router.js"]);
+      expect(files).toEqual([
+        "user-profile.controller.js",
+        "user-profile.router.js",
+        "user-profile.service.js",
+      ]);
 
       const routerSrc = fs.readFileSync(
         path.join(moduleDir, "user-profile.router.js"),

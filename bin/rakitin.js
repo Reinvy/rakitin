@@ -284,10 +284,6 @@ async function runAdd(argv) {
   }
 }
 
-function runLegacyGenerator(fn) {
-  return fn();
-}
-
 function banner() {
   console.log("🚀 rakitin — integration-first boilerplate CLI");
 }

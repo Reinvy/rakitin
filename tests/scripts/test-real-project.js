@@ -104,7 +104,7 @@ function validateSyntaxInDir(dir) {
       try {
         new vm.Script(src);
       } catch (err) {
-        throw new Error(`Syntax validation failed on ${fullPath}: ${err.message}`);
+        throw new Error(`Syntax validation failed on ${fullPath}: ${err.message}`, { cause: err });
       }
     }
   }
@@ -396,6 +396,276 @@ async function main() {
     assert(res.status === 0, `Router runtime import failed: ${res.stderr}`);
   });
 
+  // E2E-22: Runtime Require Validation of All ORMs (Prisma, Sequelize, Mongoose, TypeORM) in Both Architectures
+  runScenario("E2E-22", "Runtime Require Validation for All ORMs (Modular & Simple)", () => {
+    // Generate modular ORMs
+    runCLI(["add", "module", "pMod", "--arch", "modular", "--orm", "prisma", "--no-install", "--yes"]);
+    runCLI(["add", "module", "sMod", "--arch", "modular", "--orm", "sequelize", "--no-install", "--yes"]);
+    runCLI(["add", "module", "mMod", "--arch", "modular", "--orm", "mongoose", "--no-install", "--yes"]);
+    runCLI(["add", "module", "tMod", "--arch", "modular", "--orm", "typeorm", "--no-install", "--yes"]);
+
+    // Generate simple ORMs
+    runCLI(["add", "module", "pSim", "--arch", "simple", "--orm", "prisma", "--no-install", "--yes"]);
+    runCLI(["add", "module", "sSim", "--arch", "simple", "--orm", "sequelize", "--no-install", "--yes"]);
+    runCLI(["add", "module", "mSim", "--arch", "simple", "--orm", "mongoose", "--no-install", "--yes"]);
+    runCLI(["add", "module", "tSim", "--arch", "simple", "--orm", "typeorm", "--no-install", "--yes"]);
+
+    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
+
+    // Verify each generated service and model can resolve its relative requires without MODULE_NOT_FOUND
+    const runtimeLoaderScript = `
+      const Module = require('module');
+      const orig = Module._load;
+      Module._load = function(req, parent, isMain) {
+        if (req === '@prisma/client') {
+          return { PrismaClient: function() { return {}; } };
+        }
+        if (req === 'sequelize') {
+          function SequelizeMock() {
+            this.define = () => ({});
+          }
+          SequelizeMock.DataTypes = { INTEGER: 'INTEGER', STRING: 'STRING' };
+          SequelizeMock.Sequelize = SequelizeMock;
+          return SequelizeMock;
+        }
+        if (req === 'mongoose') {
+          const Schema = function() {};
+          return { Schema, model: () => ({}) };
+        }
+        if (req === 'typeorm') {
+          return {
+            EntitySchema: function() {},
+            DataSource: function() {
+              this.getRepository = () => ({
+                find: async () => [],
+                findOneBy: async () => ({}),
+                create: (d) => d,
+                save: async (d) => d,
+                delete: async () => ({}),
+              });
+            },
+          };
+        }
+        return orig.apply(this, arguments);
+      };
+
+      // Test Modular requires
+      require('./app/modules/p-mod/services/p-mod.service.js');
+      require('./app/modules/s-mod/services/s-mod.service.js');
+      require('./app/modules/m-mod/services/m-mod.service.js');
+      require('./app/modules/t-mod/services/t-mod.service.js');
+      require('./app/modules/s-mod/models/s-mod.model.js');
+      require('./app/modules/m-mod/models/m-mod.model.js');
+      require('./app/modules/t-mod/entities/t-mod.entity.js');
+
+      // Test Simple requires
+      require('./app/modules/p-sim/p-sim.service.js');
+      require('./app/modules/s-sim/s-sim.service.js');
+      require('./app/modules/m-sim/m-sim.service.js');
+      require('./app/modules/t-sim/t-sim.service.js');
+      require('./app/modules/s-sim/s-sim.model.js');
+      require('./app/modules/m-sim/m-sim.model.js');
+      require('./app/modules/t-sim/t-sim.entity.js');
+    `;
+
+    const res = spawnSync(process.execPath, ["-e", runtimeLoaderScript], {
+      cwd: TEST_PROJECT_DIR,
+      encoding: "utf8",
+    });
+    assert(res.status === 0, `ORM runtime require validation failed: ${res.stderr}`);
+  });
+
+  // E2E-23: Runtime Require Validation of Endpoint Generator (Modular & Simple)
+  runScenario("E2E-23", "Runtime Require Validation for Endpoint Generator (Modular & Simple)", () => {
+    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
+    runCLI(["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes"]);
+
+    runCLI(["add", "endpoint", "user", "--resource", "profile"]);
+    runCLI(["add", "endpoint", "product", "--resource", "item"]);
+
+    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
+
+    const endpointLoaderScript = `
+      const Module = require('module');
+      const orig = Module._load;
+      Module._load = function(req) {
+        if (req === 'express') return { Router: () => ({ get: () => {}, post: () => {}, put: () => {}, delete: () => {} }) };
+        return orig.apply(this, arguments);
+      };
+
+      // Modular endpoint components
+      require('./app/modules/user/routes/profile.router.js');
+      require('./app/modules/user/controllers/profile.controller.js');
+      require('./app/modules/user/services/profile.service.js');
+
+      // Simple endpoint components
+      require('./app/modules/product/item.router.js');
+      require('./app/modules/product/item.controller.js');
+      require('./app/modules/product/item.service.js');
+    `;
+
+    const res = spawnSync(process.execPath, ["-e", endpointLoaderScript], {
+      cwd: TEST_PROJECT_DIR,
+      encoding: "utf8",
+    });
+    assert(res.status === 0, `Endpoint runtime require failed: ${res.stderr}`);
+  });
+
+  // E2E-24: Runtime Require Validation of Utils, Configs, Validators, Middlewares, and Docs
+  runScenario("E2E-24", "Runtime Require Validation for Shared Utilities, Configs, Validators, Docs", () => {
+    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
+    runCLI(["add", "util", "string"]);
+    runCLI(["add", "util", "number"]);
+    runCLI(["add", "util", "array"]);
+    runCLI(["add", "config", "app"]);
+    runCLI(["add", "config", "jwt"]);
+    runCLI(["add", "config", "cors"]);
+    runCLI(["add", "middleware", "auth", "--no-install"]);
+    runCLI(["add", "middleware", "logger"]);
+    runCLI(["add", "validation", "common"]);
+    runCLI(["add", "validation", "from-module", "user"]);
+    runCLI(["add", "docs", "swagger-ui"]);
+
+    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
+
+    const sharedLoaderScript = `
+      const Module = require('module');
+      const orig = Module._load;
+      Module._load = function(req) {
+        if (req === 'jsonwebtoken') return { verify: () => ({}) };
+        if (req === 'swagger-ui-express') return { serve: () => {}, setup: () => () => {} };
+        if (req === 'swagger-jsdoc') return () => ({});
+        if (req === 'joi') {
+          const createChain = () => new Proxy(function() {}, {
+            get: (target, prop) => {
+              if (prop === 'then') return undefined;
+              return (...args) => createChain();
+            },
+            apply: (target, thisArg, args) => createChain(),
+          });
+          return createChain();
+        }
+        return orig.apply(this, arguments);
+      };
+
+      require('./app/shared/utils/string.util.js');
+      require('./app/shared/utils/number.util.js');
+      require('./app/shared/utils/array.util.js');
+      require('./app/shared/config/app.config.js');
+      require('./app/shared/config/jwt.config.js');
+      require('./app/shared/config/cors.config.js');
+      require('./app/shared/middlewares/auth.middleware.js');
+      require('./app/shared/middlewares/logger.middleware.js');
+      require('./app/shared/validators/common.validator.js');
+      require('./app/shared/validators/user.validator.js');
+      const { mountSwagger } = require('./app/docs/swagger-setup.js');
+      if (typeof mountSwagger !== 'function') throw new Error('mountSwagger is not a function');
+    `;
+
+    const res = spawnSync(process.execPath, ["-e", sharedLoaderScript], {
+      cwd: TEST_PROJECT_DIR,
+      encoding: "utf8",
+    });
+    assert(res.status === 0, `Shared components runtime require failed: ${res.stderr}`);
+  });
+
+  // E2E-25: Comprehensive Dry Run across all generator kinds
+  runScenario("E2E-25", "Strict Dry-Run Validation (Zero disk writes across all generators)", () => {
+    // None of these should write to disk when --dry-run is passed
+    runCLI(["add", "module", "dryMod", "--arch", "modular", "--orm", "none", "--dry-run", "--yes"]);
+    runCLI(["add", "util", "uuid", "--dry-run"]);
+    runCLI(["add", "config", "redis", "--dry-run"]);
+    runCLI(["add", "middleware", "error", "--dry-run", "--no-install"]);
+    runCLI(["add", "validation", "common", "--dry-run"]);
+    runCLI(["add", "docs", "openapi-json", "--dry-run"]);
+
+    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/dry-mod")), "dry-mod folder TIDAK boleh dibuat");
+    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/utils/uuid.util.js")), "uuid.util TIDAK boleh dibuat");
+    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/config/redis.config.js")), "redis.config TIDAK boleh dibuat");
+    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/middlewares/error.middleware.js")), "error.middleware TIDAK boleh dibuat");
+    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/validators/common.validator.js")), "common.validator TIDAK boleh dibuat");
+    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/docs/openapi.json")), "openapi.json TIDAK boleh dibuat");
+  });
+
+  // E2E-26: Live Express Server & HTTP Request Test
+  runScenario("E2E-26", "Live Express App & Controller Execution Test", () => {
+    runCLI(["init", "--preset", "advanced", "--yes"]);
+    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
+    runCLI(["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes"]);
+    runCLI(["add", "middleware", "logger", "--json"]);
+    runCLI(["integrate", "--middleware", "logger", "--json"]);
+
+    const liveServerScript = `
+      const Module = require('module');
+      const orig = Module._load;
+      const routes = [];
+      Module._load = function(req) {
+        if (req === 'express') {
+          const createRouter = () => ({
+            routes: [],
+            use(pathOrMw, maybeMw) {
+              if (typeof pathOrMw === 'string' && maybeMw && Array.isArray(maybeMw.routes)) {
+                for (const r of maybeMw.routes) {
+                  routes.push({ method: r.method, path: pathOrMw + (r.path === '/' ? '' : r.path), handler: r.handler });
+                }
+              }
+            },
+            get(p, h) {
+              this.routes.push({ method: 'GET', path: p, handler: h });
+              routes.push({ method: 'GET', path: p, handler: h });
+            },
+            post(p, h) {
+              this.routes.push({ method: 'POST', path: p, handler: h });
+              routes.push({ method: 'POST', path: p, handler: h });
+            },
+            put(p, h) {
+              this.routes.push({ method: 'PUT', path: p, handler: h });
+              routes.push({ method: 'PUT', path: p, handler: h });
+            },
+            delete(p, h) {
+              this.routes.push({ method: 'DELETE', path: p, handler: h });
+              routes.push({ method: 'DELETE', path: p, handler: h });
+            },
+          });
+          const fn = () => createRouter();
+          fn.Router = createRouter;
+          return fn;
+        }
+        return orig.apply(this, arguments);
+      };
+
+      const router = require('./app/routes/index.js');
+      async function testEndpoint(modulePath) {
+        const route = routes.find(r => r.path === modulePath && r.method === 'GET');
+        if (!route) throw new Error('Route not found: ' + modulePath + ' in: ' + JSON.stringify(routes.map(r => r.path)));
+        let responseData = null;
+        let responseStatus = null;
+        const mockReq = { query: {}, params: {}, body: {} };
+        const mockRes = {
+          status(s) { responseStatus = s; return this; },
+          json(d) { responseData = d; return this; },
+        };
+        await route.handler(mockReq, mockRes, (err) => { if (err) throw err; });
+        if (responseStatus !== 200) throw new Error('Expected status 200, got ' + responseStatus);
+        if (!responseData || !responseData.message) throw new Error('Expected message in response for ' + modulePath);
+      }
+
+      (async () => {
+        await testEndpoint('/user');
+        await testEndpoint('/product');
+      })().catch(err => {
+        console.error(err);
+        process.exit(1);
+      });
+    `;
+    const res = spawnSync(process.execPath, ["-e", liveServerScript], {
+      cwd: TEST_PROJECT_DIR,
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    assert(res.status === 0, `Live express test failed: ${res.stderr || res.stdout}`);
+  });
+
   // Teardown: leave tests/project in clean state
   cleanProject();
 
@@ -409,7 +679,7 @@ async function main() {
     failures.forEach((f) => console.log(`  - [${f.id}] ${f.name}: ${f.error}`));
     process.exit(1);
   } else {
-    console.log(`${colors.green}${colors.bold}🎉 Seluruh 21 skenario pengujian real-project sukses 100%!${colors.reset}\n`);
+    console.log(`${colors.green}${colors.bold}🎉 Seluruh ${passedCount} skenario pengujian real-project sukses 100%!${colors.reset}\n`);
     process.exit(0);
   }
 }
