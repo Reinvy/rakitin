@@ -306,25 +306,23 @@ printf 'openapi-json\nCatalog API\n1.0.0\nN\n' | rakitin add docs
 
 ### 3.9 `rakitin recipe auth`
 
-Composite advanced-tier recipe: JWT middleware + user module + Joi
-validators + dependency wiring + env merge.
+Composite advanced-tier recipe: Production-ready JWT authentication with password hashing (`bcryptjs`), complete user model schema (with `email`, `password`, `name`, `role`), full auth controller/service, protected routes, and Joi validation.
 
 ```bash
-rakitin recipe auth [--arch simple|modular] [--pm npm|pnpm|yarn|bun] [--json]
+rakitin recipe auth [--arch simple|modular] [--orm prisma|sequelize|mongoose|typeorm|none] [--pm npm|pnpm|yarn|bun] [--json]
 ```
 
-Steps executed: ① `createMiddleware("auth")` →
-`app/shared/middlewares/auth.middleware.js`; ② user module generated
-(architecture follows `--arch`, default modular, ORM None) unless present;
-③ `app/shared/validators/user.validator.js` with `registerSchema`
-(email, password 8–72, optional name) and `loginSchema`; ④ installs
-`jsonwebtoken` + `joi` (keys `middleware:auth`, `validation:joi`);
-⑤ merges `JWT_SECRET=change-me-please` / `JWT_EXPIRES_IN=7d` into
-`.env.example` (missing keys only). Recipes own their installs;
-`--no-install` is not consulted.
+Steps executed:
+① `createMiddleware("auth")` → `app/shared/middlewares/auth.middleware.js` (JWT token verification, attaching `req.user` & `req.credentials`);
+② User module generated with auth-ready controller and service (`register`, `login`, `getProfile`, `updateProfile`, `changePassword`, and sanitized user queries) for the chosen architecture (`modular` / `simple`);
+③ Complete User model generated for the active ORM (`prisma/schema/user.prisma`, Sequelize/Mongoose `user.model.js`, TypeORM `user.entity.js`, or in-memory store) containing `email` (unique), `password`, `name`, `role`, and timestamps;
+④ `app/shared/validators/user.validator.js` with `registerSchema`, `loginSchema`, `updateProfileSchema`, and `changePasswordSchema`;
+⑤ Installs `jsonwebtoken`, `joi`, and `bcryptjs` (keys `recipe:auth`, plus ORM driver if active);
+⑥ Merges `JWT_SECRET=change-me-please` / `JWT_EXPIRES_IN=7d` (and `DATABASE_URL` for Prisma) into `.env.example`.
 
 ```bash
-rakitin recipe auth --arch simple                    # flat user module
+rakitin recipe auth --arch modular --orm prisma      # full Prisma 7 JWT auth
+rakitin recipe auth --arch simple --orm sequelize    # flat Sequelize auth module
 J=$(rakitin recipe auth --json)
 grep -F 'JWT_EXPIRES_IN=7d' .env.example && jq -e '.ok' <<<"$J"
 jq -e 'any(.created[]; contains("validators/user.validator.js"))' <<<"$J"   # CI assertion

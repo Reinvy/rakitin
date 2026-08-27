@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`rakitin config` CLI Command**: New `rakitin config` command (`list`, `get <key>`, `set <key> <value>`, and interactive) allowing easy management and modification of `.rakitinrc.json`.
 - **Zero-Prompt Config-Driven Module Generation**: Module generation (`rakitin add module` and interactive menu) strictly respects `.rakitinrc.json` configuration, asking only for the module name without redundant intermediate prompts.
 - **Automatic Router Integration**: Configurable `autoIntegrateRouter` automatically wires newly created modules into `app/routes/index.js`.
+- **Production-Ready & Feature-Complete Auth Recipe (`recipe auth`)**: Upgraded `rakitin recipe auth` to generate a ready-to-use authentication setup with `bcryptjs` password hashing, JWT signing & verification (`auth.middleware.js`), full User models with `email` (`@unique`), `password`, `name`, `role`, and timestamps across all ORMs (Prisma 7, Sequelize, Mongoose, TypeORM, None), comprehensive Joi schemas (`registerSchema`, `loginSchema`, `updateProfileSchema`, `changePasswordSchema`), and complete endpoints (`register`, `login`, `getProfile`/`me`, `updateProfile`, `changePassword`, and sanitized user queries).
 
 ## [2.0.0] - 2026-08-27
 
