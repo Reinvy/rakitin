@@ -71,7 +71,8 @@
     "lib",
     "bin",
     "types",
-    "dist"
+    "dist",
+    "rakitin.schema.json"
   ],
   "engines": {
     "node": ">=18.0.0"
