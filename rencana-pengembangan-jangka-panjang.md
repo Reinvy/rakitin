@@ -12,13 +12,15 @@
 - Nama yang unik dan mudah diingat
 
 ### 1.2 Kelemahan
-- Fitur Integrasi Router Utama masih dalam pengembangan
-- Belum ada sistem pengujian yang terstruktur
-- Belum ada standar kode yang jelas
-- Fitur Config masih dalam pengembangan
-- Ketergantungan pada library pihak ketiga yang masih terbatas
-- Dokumentasi API masih kurang lengkap
-- Belum ada sistem CI/CD
+- Onboarding kontributor eksternal masih perlu dibina (community dalam tahap awal)
+- Sebagian generator masih memakai template literal inline — migrasi ke `.ejs` files
+  berjalan bertahap (`docs/architecture.md` § Template strategy)
+- API library-level belum semuanya punya coverage type `types/index.d.ts` yang rapi
+- Komunitas & distribusi (docs site, playground) belum ada
+
+> Catatan status 2026: pengujian terstruktur, standar kode, dan CI/CD sudah
+> terealisasi sejak v2.0.0 — lihat `tests/`, `docs/coding-standards.md`,
+> `.github/workflows/` dan `AGENTS.md` untuk detail praktiknya.
 
 ### 1.3 Peluang
 - Permintaan akan tools untuk mempercepat pengembangan backend semakin tinggi

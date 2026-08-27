@@ -1,1628 +1,321 @@
-# 📏 Standar Pengkodean rakitin
-
-## 🇮🇩 Bahasa Indonesia
-
-### Pendahuluan
-
-Dokumen ini menjelaskan standar pengkodean yang digunakan dalam proyek **rakitin**. Standar ini bertujuan untuk menjaga konsistensi, keterbacaan, dan kualitas kode di seluruh proyek.
-
-### Standar Umum
-
-#### 1. Penamaan
-
-##### Variabel dan Fungsi
-- Gunakan **camelCase** untuk nama variabel dan fungsi
-- Nama harus deskriptif dan jelas
-- Hindari singkatan yang tidak umum
-
-```javascript
-// Benar
-const userName = "John";
-const getUserData = () => { ... };
-
-// Salah
-const username = "John";  // Tidak konsisten dengan camelCase
-const getUsrData = () => { ... };  // Singkatan tidak jelas
-```
-
-##### Class dan Constructor
-- Gunakan **PascalCase** untuk nama class dan constructor
-
-```javascript
-// Benar
-class UserController { ... }
-const user = new UserController();
-
-// Salah
-class userController { ... }
-const user = new userController();
-```
-
-##### Konstanta
-- Gunakan **UPPER_CASE** untuk nama konstanta
-- Pisahkan kata dengan underscore (_)
-
-```javascript
-// Benar
-const MAX_LOGIN_ATTEMPTS = 3;
-const API_BASE_URL = "https://api.example.com";
-
-// Salah
-const maxLoginAttempts = 3;
-const apiBaseUrl = "https://api.example.com";
-```
-
-##### File
-- Gunakan **kebab-case** untuk nama file
-- Nama file harus mencerminkan isinya
-
-```javascript
-// Benar
-// file: user-controller.js
-class UserController { ... }
-
-// file: user-service.js
-class UserService { ... }
-
-// Salah
-// file: userController.js
-class UserController { ... }
-```
-
-#### 2. Format Kode
-
-##### Indentasi
-- Gunakan **2 spasi** untuk indentasi
-- Jangan gunakan tab
-
-```javascript
-// Benar
-function getData() {
-  if (condition) {
-    return result;
-  }
-}
-
-// Salah
-function getData() {
-	if (condition) {
-		return result;
-	}
-}
-```
-
-##### Panjang Baris
-- Batasi panjang baris hingga **100 karakter**
-- Jika perlu, pecah baris dengan logis
-
-```javascript
-// Benar
-const longVariableName = someFunction(
-  parameter1,
-  parameter2
-);
-
-// Salah
-const longVariableName = someFunction(parameter1, parameter2);
-```
-
-##### Spasi
-- Gunakan spasi setelah koma
-- Gunakan spasi di sekitar operator
-- Gunakan spasi setelah titik dua dalam objek
-
-```javascript
-// Benar
-const user = { name: "John", age: 30 };
-const sum = a + b;
-
-// Salah
-const user = {name:"John",age:30};
-const sum = a+b;
-```
-
-##### Titik Koma
-- Gunakan titik koma di akhir setiap pernyataan
-
-```javascript
-// Benar
-const name = "John";
-console.log(name);
-
-// Salah
-const name = "John"
-console.log(name)
-```
-
-#### 3. Struktur File
-
-##### Urutan Import
-- Import dari pihak ketiga
-- Import dari modul internal
-- Import relatif
-
-```javascript
-// Benar
-const inquirer = require("inquirer");  // Third party
-const constants = require("../../constants");  // Internal module
-const utils = require("./utils");  // Relative import
-
-// Salah
-const utils = require("./utils");
-const inquirer = require("inquirer");
-const constants = require("../../constants");
-```
-
-##### Komentar File
-- Setiap file harus memiliki komentar deskriptif di bagian atas
-- Sertakan informasi tentang tujuan file
-
-```javascript
-/**
- * Generator untuk modul aplikasi
- * Menangani pembuatan struktur modul dengan berbagai arsitektur
- */
-
-const inquirer = require("inquirer");
-// ... rest of the code
-```
-
-#### 4. Fungsi
-
-##### Deklarasi Fungsi
-- Gunakan arrow function untuk fungsi anonim
-- Gunakan function declaration untuk fungsi utama
-
-```javascript
-// Benar
-async function generateModule() { ... }
-
-const processData = (data) => { ... };
-
-// Salah
-const generateModule = async function() { ... };
-
-function processData(data) { ... }
-```
-
-##### Dokumentasi Fungsi
-- Gunakan JSDoc untuk dokumentasi fungsi publik
-- Sertakan deskripsi, parameter, dan return value
-
-```javascript
-/**
- * Menghasilkan konfigurasi untuk aplikasi
- * @param {string} configType - Tipe konfigurasi yang akan dibuat
- * @returns {Promise<void>}
- */
-async function generateConfig(configType) { ... }
-```
-
-##### Parameter Fungsi
-- Batasi jumlah parameter (maksimal 3-4)
-- Jika banyak parameter, gunakan options object
-
-```javascript
-// Benar
-function createUser({ name, email, password, role }) { ... }
-
-// Salah
-function createUser(name, email, password, role) { ... }
-```
-
-#### 5. Komentar
-
-##### Bahasa
-- Gunakan **bahasa Indonesia** untuk semua komentar
-- Kecuali untuk nama variabel atau fungsi yang sudah umum dalam bahasa Inggris
-
-```javascript
-// Benar
-// Mendapatkan data user dari database
-const userData = await User.findById(id);
-
-// Salah
-// Get user data from database
-const userData = await User.findById(id);
-```
-
-##### Komentar satu baris
-- Gunakan `//` untuk komentar satu baris
-- Berikan spasi setelah `//`
-
-```javascript
-// Benar
-// Validasi input user
-if (!input) return false;
-
-// Salah
-//Validasi input user
-if (!input) return false;
-```
-
-##### Komentar multi-baris
-- Gunakan `/* ... */` untuk komentar multi-baris
-
-```javascript
-/*
- * Fungsi ini digunakan untuk menghasilkan file konfigurasi
- * berdasarkan tipe yang dipilih oleh user
- */
-function generateConfig() { ... }
-```
-
-#### 6. Penanganan Error
-
-##### Try-Catch
-- Gunakan try-catch untuk operasi asinkron yang mungkin gagal
-- Berikan pesan error yang jelas dan informatif
-
-```javascript
-// Benar
-try {
-  const result = await someOperation();
-  return result;
-} catch (error) {
-  console.error(`Gagal melakukan operasi: ${error.message}`);
-  throw error;
-}
-
-// Salah
-try {
-  const result = await someOperation();
-  return result;
-} catch (err) {
-  console.log("Error");
-}
-```
-
-##### Error Custom
-- Buat error class untuk error spesifik
-- Extend dari Error class standar
-
-```javascript
-class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-// Penggunaan
-throw new ValidationError("Input tidak valid");
-```
-
-#### 7. Promise dan Asynchrony
-
-##### Async/Await
-- Gunakan async/await daripada .then/.catch
-- Selalu tangani error dengan try-catch
-
-```javascript
-// Benar
-async function getUserData() {
-  try {
-    const user = await User.findById(id);
-    return user;
-  } catch (error) {
-    console.error(`Gagal mendapatkan user: ${error.message}`);
-    throw error;
-  }
-}
-
-// Salah
-function getUserData() {
-  return User.findById(id)
-    .then(user => user)
-    .catch(error => {
-      console.log("Error:", error);
-      throw error;
-    });
-}
-```
-
-#### 8. Logging
-
-##### Level Logging
-- Gunakan console.error untuk error
-- Gunakan console.log untuk informasi umum
-- Tambahkan emoji atau prefix untuk memudahkan identifikasi
-
-```javascript
-// Benar
-console.log("✅ Modul berhasil dibuat");
-console.error("❌ Gagal membuat modul");
-
-// Salah
-console.log("Module created successfully");
-console.error("Failed to create module");
-```
-
-### Standar Spesifik rakitin
-
-#### 1. Struktur Generator
-
-##### File Generator
-- Setiap generator harus memiliki file utama dengan nama yang sesuai
-- File harus berada di direktori `lib/generator/[type]/[name].js`
-
-```javascript
-// Struktur yang benar
-lib/generator/config/config.js
-lib/generator/module/module.js
-lib/generator/middleware/middleware.js
-```
-
-##### Fungsi Generator
-- Setiap generator harus mengexport fungsi utama dengan nama `generate[Name]`
-- Fungsi harus async
-- Harus memiliki validasi input
-- Harus memiliki error handling
-
-```javascript
-/**
- * Generator untuk konfigurasi
- * @returns {Promise<void>}
- */
-async function generateConfig() {
-  try {
-    // Validasi input
-    if (!input) {
-      throw new Error("Input tidak boleh kosong");
-    }
-    
-    // Logika generator
-    // ...
-    
-    console.log("✅ Konfigurasi berhasil dibuat");
-  } catch (error) {
-    console.error(`❌ Gagal membuat konfigurasi: ${error.message}`);
-    throw error;
-  }
-}
-
-module.exports = generateConfig;
-```
-
-#### 2. Prompt Interaktif
-
-##### Struktur Prompt
-- Gunakan inquirer untuk prompt interaktif
-- Kelompokkan prompt terkait
-- Berikan pesan yang jelas dan deskriptif
-
-```javascript
-// Benar
-const { configType, customName } = await inquirer.default.prompt([
-  {
-    type: "list",
-    name: "configType",
-    message: "Pilih jenis config yang ingin dibuat:",
-    choices: ["app", "database", "jwt"],
-  },
-  {
-    type: "input",
-    name: "customName",
-    message: "Nama config custom:",
-    when: (answers) => answers.configType === "custom",
-  },
-]);
-```
-
-#### 3. Utilitas
-
-##### Fungsi Utilitas
-- Tempatkan fungsi utilitas di `lib/utils.js`
-- Berikan JSDoc untuk setiap fungsi
-- Buat fungsi yang dapat digunakan kembali
-
-```javascript
-/**
- * Memastikan sebuah direktori ada. Jika tidak, direktori akan dibuat.
- * @param {string} dir Path ke direktori.
- */
-function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-}
-```
-
-#### 4. Konstanta
-
-##### Definisi Konstanta
-- Tempatkan semua konstanta di `lib/constants.js`
-- Gunakan path.join untuk cross-platform compatibility
-
-```javascript
-const path = require("path");
-
-const basePath = path.join(process.cwd(), "app");
-const modulesPath = path.join(basePath, "modules");
-const sharedPath = path.join(basePath, "shared");
-
-module.exports = {
-  basePath,
-  modulesPath,
-  sharedPath,
-};
-```
+# rakitin Coding Standards
+
+> Scope: everything under `lib/`, `bin/`, `tests/`. Docs are English-primary.
+> These standards encode the invariants reviewers actually enforce; where a
+> rule exists to prevent a real historical bug, the bug is cited.
 
 ---
 
-## 🇬🇧 English
-
-### Introduction
-
-This document explains the coding standards used in the **rakitin** project. These standards are intended to maintain consistency, readability, and code quality throughout the project.
-
-### General Standards
-
-#### 1. Naming
-
-##### Variables and Functions
-- Use **camelCase** for variable and function names
-- Names should be descriptive and clear
-- Avoid uncommon abbreviations
-
-```javascript
-// Correct
-const userName = "John";
-const getUserData = () => { ... };
-
-// Incorrect
-const username = "John";  // Not consistent with camelCase
-const getUsrData = () => { ... };  // Unclear abbreviation
-```
-
-##### Classes and Constructors
-- Use **PascalCase** for class and constructor names
-
-```javascript
-// Correct
-class UserController { ... }
-const user = new UserController();
-
-// Incorrect
-class userController { ... }
-const user = new userController();
-```
-
-##### Constants
-- Use **UPPER_CASE** for constant names
-- Separate words with underscore (_)
-
-```javascript
-// Correct
-const MAX_LOGIN_ATTEMPTS = 3;
-const API_BASE_URL = "https://api.example.com";
-
-// Incorrect
-const maxLoginAttempts = 3;
-const apiBaseUrl = "https://api.example.com";
-```
-
-##### Files
-- Use **kebab-case** for file names
-- File names should reflect their content
-
-```javascript
-// Correct
-// file: user-controller.js
-class UserController { ... }
-
-// file: user-service.js
-class UserService { ... }
-
-// Incorrect
-// file: userController.js
-class UserController { ... }
-```
-
-#### 2. Code Formatting
-
-##### Indentation
-- Use **2 spaces** for indentation
-- Do not use tabs
-
-```javascript
-// Correct
-function getData() {
-  if (condition) {
-    return result;
-  }
-}
-
-// Incorrect
-function getData() {
-	if (condition) {
-		return result;
-	}
-}
-```
-
-##### Line Length
-- Limit line length to **100 characters**
-- If necessary, break lines logically
-
-```javascript
-// Correct
-const longVariableName = someFunction(
-  parameter1,
-  parameter2
-);
-
-// Incorrect
-const longVariableName = someFunction(parameter1, parameter2);
-```
-
-##### Spacing
-- Use space after comma
-- Use space around operators
-- Use space after colon in objects
-
-```javascript
-// Correct
-const user = { name: "John", age: 30 };
-const sum = a + b;
-
-// Incorrect
-const user = {name:"John",age:30};
-const sum = a+b;
-```
-
-##### Semicolons
-- Use semicolons at the end of each statement
-
-```javascript
-// Correct
-const name = "John";
-console.log(name);
-
-// Incorrect
-const name = "John"
-console.log(name)
-```
-
-#### 3. File Structure
-
-##### Import Order
-- Third-party imports
-- Internal module imports
-- Relative imports
-
-```javascript
-// Correct
-const inquirer = require("inquirer");  // Third party
-const constants = require("../../constants");  // Internal module
-const utils = require("./utils");  // Relative import
-
-// Incorrect
-const utils = require("./utils");
-const inquirer = require("inquirer");
-const constants = require("../../constants");
-```
-
-##### File Comments
-- Each file should have a descriptive comment at the top
-- Include information about the file's purpose
-
-```javascript
-/**
- * Generator for application modules
- * Handles creation of module structures with various architectures
- */
-
-const inquirer = require("inquirer");
-// ... rest of the code
-```
-
-#### 4. Functions
-
-##### Function Declaration
-- Use arrow functions for anonymous functions
-- Use function declarations for main functions
-
-```javascript
-// Correct
-async function generateModule() { ... }
-
-const processData = (data) => { ... };
-
-// Incorrect
-const generateModule = async function() { ... };
-
-function processData(data) { ... }
-```
-
-##### Function Documentation
-- Use JSDoc for public function documentation
-- Include description, parameters, and return value
-
-```javascript
-/**
- * Generates configuration for the application
- * @param {string} configType - Type of configuration to create
- * @returns {Promise<void>}
- */
-async function generateConfig(configType) { ... }
-```
-
-##### Function Parameters
-- Limit number of parameters (max 3-4)
-- If many parameters, use options object
-
-```javascript
-// Correct
-function createUser({ name, email, password, role }) { ... }
-
-// Incorrect
-function createUser(name, email, password, role) { ... }
-```
-
-#### 5. Comments
-
-##### Language
-- Use **Indonesian** for all comments
-- Except for variable or function names that are already common in English
-
-```javascript
-// Correct
-// Mendapatkan data user dari database
-const userData = await User.findById(id);
-
-// Incorrect
-// Get user data from database
-const userData = await User.findById(id);
-```
-
-##### Single-line Comments
-- Use `//` for single-line comments
-- Provide space after `//`
-
-```javascript
-// Correct
-// Validasi input user
-if (!input) return false;
-
-// Incorrect
-//Validasi input user
-if (!input) return false;
-```
-
-##### Multi-line Comments
-- Use `/* ... */` for multi-line comments
-
-```javascript
-/*
- * Fungsi ini digunakan untuk menghasilkan file konfigurasi
- * berdasarkan tipe yang dipilih oleh user
- */
-function generateConfig() { ... }
-```
-
-#### 6. Error Handling
-
-##### Try-Catch
-- Use try-catch for asynchronous operations that might fail
-- Provide clear and informative error messages
-
-```javascript
-// Correct
-try {
-  const result = await someOperation();
-  return result;
-} catch (error) {
-  console.error(`Gagal melakukan operasi: ${error.message}`);
-  throw error;
-}
-
-// Incorrect
-try {
-  const result = await someOperation();
-  return result;
-} catch (err) {
-  console.log("Error");
-}
-```
-
-##### Custom Errors
-- Create error classes for specific errors
-- Extend from standard Error class
-
-```javascript
-class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-// Usage
-throw new ValidationError("Input tidak valid");
-```
-
-#### 7. Promises and Asynchrony
-
-##### Async/Await
-- Use async/await instead of .then/.catch
-- Always handle errors with try-catch
-
-```javascript
-// Correct
-async function getUserData() {
-  try {
-    const user = await User.findById(id);
-    return user;
-  } catch (error) {
-    console.error(`Gagal mendapatkan user: ${error.message}`);
-    throw error;
-  }
-}
-
-// Incorrect
-function getUserData() {
-  return User.findById(id)
-    .then(user => user)
-    .catch(error => {
-      console.log("Error:", error);
-      throw error;
-    });
-}
-```
-
-#### 8. Logging
-
-##### Logging Levels
-- Use console.error for errors
-- Use console.log for general information
-- Add emoji or prefix for easier identification
-
-```javascript
-// Correct
-console.log("✅ Modul berhasil dibuat");
-console.error("❌ Gagal membuat modul");
-
-// Incorrect
-console.log("Module created successfully");
-console.error("Failed to create module");
-```
-
-### rakitin-Specific Standards
-
-#### 1. Generator Structure
-
-##### Generator Files
-- Each generator should have a main file with an appropriate name
-- File should be in directory `lib/generator/[type]/[name].js`
-
-```javascript
-// Correct structure
-lib/generator/config/config.js
-lib/generator/module/module.js
-lib/generator/middleware/middleware.js
-```
-
-##### Generator Functions
-- Each generator should export a main function named `generate[Name]`
-- Function should be async
-- Should have input validation
-- Should have error handling
-
-```javascript
-/**
- * Generator for configuration
- * @returns {Promise<void>}
- */
-async function generateConfig() {
-  try {
-    // Input validation
-    if (!input) {
-      throw new Error("Input tidak boleh kosong");
-    }
-    
-    // Generator logic
-    // ...
-    
-    console.log("✅ Konfigurasi berhasil dibuat");
-  } catch (error) {
-    console.error(`❌ Gagal membuat konfigurasi: ${error.message}`);
-    throw error;
-  }
-}
-
-module.exports = generateConfig;
-```
-
-#### 2. Interactive Prompts
-
-##### Prompt Structure
-- Use inquirer for interactive prompts
-- Group related prompts
-- Provide clear and descriptive messages
-
-```javascript
-// Correct
-const { configType, customName } = await inquirer.default.prompt([
-  {
-    type: "list",
-    name: "configType",
-    message: "Pilih jenis config yang ingin dibuat:",
-    choices: ["app", "database", "jwt"],
-  },
-  {
-    type: "input",
-    name: "customName",
-    message: "Nama config custom:",
-    when: (answers) => answers.configType === "custom",
-  },
-]);
-```
-
-#### 3. Utilities
-
-##### Utility Functions
-- Place utility functions in `lib/utils.js`
-- Provide JSDoc for each function
-- Create reusable functions
-
-```javascript
-/**
- * Memastikan sebuah direktori ada. Jika tidak, direktori akan dibuat.
- * @param {string} dir Path ke direktori.
- */
-function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-}
-```
-
-#### 4. Constants
-
-##### Constant Definitions
-- Place all constants in `lib/constants.js`
-- Use path.join for cross-platform compatibility
-
-```javascript
-const path = require("path");
-
-const basePath = path.join(process.cwd(), "app");
-const modulesPath = path.join(basePath, "modules");
-const sharedPath = path.join(basePath, "shared");
-
-module.exports = {
-  basePath,
-  modulesPath,
-  sharedPath,
-};```javascript
-/**
- * Generator untuk modul aplikasi
- * Menangani pembuatan struktur modul dengan berbagai arsitektur
- */
-
-const inquirer = require("inquirer");
-// ... rest of the code
-```
-
-#### 4. Fungsi
-
-##### Deklarasi Fungsi
-- Gunakan arrow function untuk fungsi anonim
-- Gunakan function declaration untuk fungsi utama
-
-```javascript
-// Benar
-async function generateModule() { ... }
-
-const processData = (data) => { ... };
-
-// Salah
-const generateModule = async function() { ... };
-
-function processData(data) { ... }
-```
-
-##### Dokumentasi Fungsi
-- Gunakan JSDoc untuk dokumentasi fungsi publik
-- Sertakan deskripsi, parameter, dan return value
-
-```javascript
-/**
- * Menghasilkan konfigurasi untuk aplikasi
- * @param {string} configType - Tipe konfigurasi yang akan dibuat
- * @returns {Promise<void>}
- */
-async function generateConfig(configType) { ... }
-```
-
-##### Parameter Fungsi
-- Batasi jumlah parameter (maksimal 3-4)
-- Jika banyak parameter, gunakan options object
-
-```javascript
-// Benar
-function createUser({ name, email, password, role }) { ... }
-
-// Salah
-function createUser(name, email, password, role) { ... }
-```
-
-#### 5. Komentar
-
-##### Bahasa
-- Gunakan **bahasa Indonesia** untuk semua komentar
-- Kecuali untuk nama variabel atau fungsi yang sudah umum dalam bahasa Inggris
-
-```javascript
-// Benar
-// Mendapatkan data user dari database
-const userData = await User.findById(id);
-
-// Salah
-// Get user data from database
-const userData = await User.findById(id);
-```
-
-##### Komentar satu baris
-- Gunakan `//` untuk komentar satu baris
-- Berikan spasi setelah `//`
-
-```javascript
-// Benar
-// Validasi input user
-if (!input) return false;
-
-// Salah
-//Validasi input user
-if (!input) return false;
-```
-
-##### Komentar multi-baris
-- Gunakan `/* ... */` untuk komentar multi-baris
-
-```javascript
-/*
- * Fungsi ini digunakan untuk menghasilkan file konfigurasi
- * berdasarkan tipe yang dipilih oleh user
- */
-function generateConfig() { ... }
-```
-
-#### 6. Penanganan Error
-
-##### Try-Catch
-- Gunakan try-catch untuk operasi asinkron yang mungkin gagal
-- Berikan pesan error yang jelas dan informatif
-
-```javascript
-// Benar
-try {
-  const result = await someOperation();
-  return result;
-} catch (error) {
-  console.error(`Gagal melakukan operasi: ${error.message}`);
-  throw error;
-}
-
-// Salah
-try {
-  const result = await someOperation();
-  return result;
-} catch (err) {
-  console.log("Error");
-}
-```
-
-##### Error Custom
-- Buat error class untuk error spesifik
-- Extend dari Error class standar
-
-```javascript
-class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-// Penggunaan
-throw new ValidationError("Input tidak valid");
-```
-
-#### 7. Promise dan Asynchrony
-
-##### Async/Await
-- Gunakan async/await daripada .then/.catch
-- Selalu tangani error dengan try-catch
-
-```javascript
-// Benar
-async function getUserData() {
-  try {
-    const user = await User.findById(id);
-    return user;
-  } catch (error) {
-    console.error(`Gagal mendapatkan user: ${error.message}`);
-    throw error;
-  }
-}
-
-// Salah
-function getUserData() {
-  return User.findById(id)
-    .then(user => user)
-    .catch(error => {
-      console.log("Error:", error);
-      throw error;
-    });
-}
-```
-
-#### 8. Logging
-
-##### Level Logging
-- Gunakan console.error untuk error
-- Gunakan console.log untuk informasi umum
-- Tambahkan emoji atau prefix untuk memudahkan identifikasi
-
-```javascript
-// Benar
-console.log("✅ Modul berhasil dibuat");
-console.error("❌ Gagal membuat modul");
-
-// Salah
-console.log("Module created successfully");
-console.error("Failed to create module");
-```
-
-### Standar Spesifik rakitin
-
-#### 1. Struktur Generator
-
-##### File Generator
-- Setiap generator harus memiliki file utama dengan nama yang sesuai
-- File harus berada di direktori `lib/generator/[type]/[name].js`
-
-```javascript
-// Struktur yang benar
-lib/generator/config/config.js
-lib/generator/module/module.js
-lib/generator/middleware/middleware.js
-```
-
-##### Fungsi Generator
-- Setiap generator harus mengexport fungsi utama dengan nama `generate[Name]`
-- Fungsi harus async
-- Harus memiliki validasi input
-- Harus memiliki error handling
-
-```javascript
-/**
- * Generator untuk konfigurasi
- * @returns {Promise<void>}
- */
-async function generateConfig() {
-  try {
-    // Validasi input
-    if (!input) {
-      throw new Error("Input tidak boleh kosong");
-    }
-    
-    // Logika generator
-    // ...
-    
-    console.log("✅ Konfigurasi berhasil dibuat");
-  } catch (error) {
-    console.error(`❌ Gagal membuat konfigurasi: ${error.message}`);
-    throw error;
-  }
-}
-
-module.exports = generateConfig;
-```
-
-#### 2. Prompt Interaktif
-
-##### Struktur Prompt
-- Gunakan inquirer untuk prompt interaktif
-- Kelompokkan prompt terkait
-- Berikan pesan yang jelas dan deskriptif
-
-```javascript
-// Benar
-const { configType, customName } = await inquirer.default.prompt([
-  {
-    type: "list",
-    name: "configType",
-    message: "Pilih jenis config yang ingin dibuat:",
-    choices: ["app", "database", "jwt"],
-  },
-  {
-    type: "input",
-    name: "customName",
-    message: "Nama config custom:",
-    when: (answers) => answers.configType === "custom",
-  },
-]);
-```
-
-#### 3. Utilitas
-
-##### Fungsi Utilitas
-- Tempatkan fungsi utilitas di `lib/utils.js`
-- Berikan JSDoc untuk setiap fungsi
-- Buat fungsi yang dapat digunakan kembali
-
-```javascript
-/**
- * Memastikan sebuah direktori ada. Jika tidak, direktori akan dibuat.
- * @param {string} dir Path ke direktori.
- */
-function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-}
-```
-
-#### 4. Konstanta
-
-##### Definisi Konstanta
-- Tempatkan semua konstanta di `lib/constants.js`
-- Gunakan path.join untuk cross-platform compatibility
-
-```javascript
-const path = require("path");
-
-const basePath = path.join(process.cwd(), "app");
-const modulesPath = path.join(basePath, "modules");
-const sharedPath = path.join(basePath, "shared");
-
-module.exports = {
-  basePath,
-  modulesPath,
-  sharedPath,
-};
-```
+## 1. Naming conventions
+
+### 1.1 Files
+
+| Area | Rule | Examples |
+| --- | --- | --- |
+| **Generators only** (`lib/generator/**`) | kebab-case file names carrying an explicit role suffix describing what the file produces: `.arch.js` for architecture blueprints, `.orm.js` for ORM wiring, plus the feature noun it generates. | `simple.arch.js`, `modular.arch.js`, `prisma.orm.js`, `mongoose.orm.js`, `orm-service-generator.js` |
+| **Everything else in `lib/`** (`lib/*`, `lib/commands/`, `lib/deps/`, `lib/project/`, `lib/template/`, `lib/ui/`, `lib/utils/`) | Domain-named single words or kebab-case phrases — no role suffix. The module *is* the domain concept. | `naming.js`, `safety.js`, `constants.js`, `installer.js`, `detector.js`, `manifest.js`, `shared.js`, `error-handler.js`, `path-resolver.js`, `validation-utils.js` |
+| Tests | `<subject>.test.js` next to their layer folders (`tests/unit/`, `tests/lib/…`, `tests/integration/`, `tests/regression/`). Jest matches `**/tests/**/*.test.js`. | `naming.test.js`, `installer.test.js`, `p0-bugfixes.test.js` |
+
+Do not introduce new role-suffix families. If you find yourself inventing
+`.factory.js` or `.manager.js`, split by domain instead.
+
+### 1.2 Code identifiers
+
+- Functions/classes: camelCase / PascalCase respectively — but any identifier
+  derived from user input inside generated code must come from
+  `lib/naming.js`'s `toIdentifier()` (never raw template interpolation).
+  Case conversion must use `toPascalCase` / `toCamelCase` / `toKebabCase` /
+  `toSnakeCase` / `toConstantCase`; duplicating regexes locally is a review
+  blocker because drift here breaks router integration.
+- Directory/file variants of a user name: `getModuleVariants(name)` returns all
+  of them at once — use that instead of calling converters ad hoc.
+- Constants: CONSTANT_CASE (`DEFAULT_RETRY_CONFIG`, `ROUTES_BLOCK_START`,
+  `KIND_DEPENDENCIES`). Boolean flags in command context read as adjectives:
+  `dryRun`, `overwrite`.
 
 ---
 
-## 🇬🇧 English
+## 2. Module system
 
-### Introduction
+- **CommonJS only**: `const x = require("x")` / `module.exports = { … }`.
+  No ESM syntax in shipped code (the CLI targets Node >= 18 and is loaded as CJS).
+- **Barrels stay thin**: barrel files re-export their sibling(s) and nothing else.
+  - `lib/utils/index.js` → `module.exports = require("./logger.js");`
+  - `lib/ui/index.js` → same pattern for progress UI.
+  - `lib/template/index.js` → same pattern for the engine.
+  - Aggregating barrels may spread (`lib/generator/module/arch/arch.js`
+    spreads `simpleArch` + `modularArch`).
+- **`__esModule` compat fields stay where they exist.** Legacy surfaces such as
+  `lib/installer.js` and `lib/utils.js` end with:
 
-This document explains the coding standards used in the **rakitin** project. These standards are intended to maintain consistency, readability, and code quality throughout the project.
+  ```js
+  module.exports.__esModule = true;
+  module.exports.default = module.exports;
+  ```
 
-### General Standards
+  Keep them on modules that already have them (transpiled Babel-era consumers
+  interop with them); do NOT add them to brand-new modules unless such
+  interoperability is actually required — prefer clean named exports.
 
-#### 1. Naming
+---
 
-##### Variables and Functions
-- Use **camelCase** for variable and function names
-- Names should be descriptive and clear
-- Avoid uncommon abbreviations
+## 3. JSDoc
 
-```javascript
-// Correct
-const userName = "John";
-const getUserData = () => { ... };
+Every public function gets a JSDoc block documenting purpose and contract:
 
-// Incorrect
-const username = "John";  // Not consistent with camelCase
-const getUsrData = () => { ... };  // Unclear abbreviation
-```
-
-##### Classes and Constructors
-- Use **PascalCase** for class and constructor names
-
-```javascript
-// Correct
-class UserController { ... }
-const user = new UserController();
-
-// Incorrect
-class userController { ... }
-const user = new userController();
-```
-
-##### Constants
-- Use **UPPER_CASE** for constant names
-- Separate words with underscore (_)
-
-```javascript
-// Correct
-const MAX_LOGIN_ATTEMPTS = 3;
-const API_BASE_URL = "https://api.example.com";
-
-// Incorrect
-const maxLoginAttempts = 3;
-const apiBaseUrl = "https://api.example.com";
-```
-
-##### Files
-- Use **kebab-case** for file names
-- File names should reflect their content
-
-```javascript
-// Correct
-// file: user-controller.js
-class UserController { ... }
-
-// file: user-service.js
-class UserService { ... }
-
-// Incorrect
-// file: userController.js
-class UserController { ... }
-```
-
-#### 2. Code Formatting
-
-##### Indentation
-- Use **2 spaces** for indentation
-- Do not use tabs
-
-```javascript
-// Correct
-function getData() {
-  if (condition) {
-    return result;
-  }
-}
-
-// Incorrect
-function getData() {
-	if (condition) {
-		return result;
-	}
-}
-```
-
-##### Line Length
-- Limit line length to **100 characters**
-- If necessary, break lines logically
-
-```javascript
-// Correct
-const longVariableName = someFunction(
-  parameter1,
-  parameter2
-);
-
-// Incorrect
-const longVariableName = someFunction(parameter1, parameter2);
-```
-
-##### Spacing
-- Use space after comma
-- Use space around operators
-- Use space after colon in objects
-
-```javascript
-// Correct
-const user = { name: "John", age: 30 };
-const sum = a + b;
-
-// Incorrect
-const user = {name:"John",age:30};
-const sum = a+b;
-```
-
-##### Semicolons
-- Use semicolons at the end of each statement
-
-```javascript
-// Correct
-const name = "John";
-console.log(name);
-
-// Incorrect
-const name = "John"
-console.log(name)
-```
-
-#### 3. File Structure
-
-##### Import Order
-- Third-party imports
-- Internal module imports
-- Relative imports
-
-```javascript
-// Correct
-const inquirer = require("inquirer");  // Third party
-const constants = require("../../constants");  // Internal module
-const utils = require("./utils");  // Relative import
-
-// Incorrect
-const utils = require("./utils");
-const inquirer = require("inquirer");
-const constants = require("../../constants");
-```
-
-##### File Comments
-- Each file should have a descriptive comment at the top
-- Include information about the file's purpose
-
-```javascript
+```js
 /**
- * Generator for application modules
- * Handles creation of module structures with various architectures
+ * Normalize a module name to kebab-case directory form ("UserProfile" -> "user-profile").
+ * Throws on empty/non-string input because callers rely on the result
+ * being a real directory name.
+ * @param {string} moduleName
+ * @returns {string}
  */
-
-const inquirer = require("inquirer");
-// ... rest of the code
 ```
 
-#### 4. Functions
+Minimum bar:
 
-##### Function Declaration
-- Use arrow functions for anonymous functions
-- Use function declarations for main functions
+- Public/exported functions: `@param` for every argument, `@returns`, and one
+  sentence stating observable behavior (especially throw conditions).
+- Factory functions and objects: document returned shape when it is a plain
+  object literal (`@returns {{written: boolean, skipped: "exists"|null}}`).
+- Non-obvious `throw`s must be called out — callers depend on knowing whether
+  errors propagate or get swallowed.
+- Private helpers (`_compile`, `_set`, `_mergeConfig`) still benefit from short
+  blocks; `@private` is optional, naming convention signals intent.
 
-```javascript
-// Correct
-async function generateModule() { ... }
+---
 
-const processData = (data) => { ... };
+## 4. Error handling contract
 
-// Incorrect
-const generateModule = async function() { ... };
+Two error utilities exist with different semantics — know which you're using:
 
-function processData(data) { ... }
-```
+### 4.1 `validation-utils.handleError(context, error)` — ALWAYS rethrows
 
-##### Function Documentation
-- Use JSDoc for public function documentation
-- Include description, parameters, and return value
+Located at `lib/generator/shared/validation-utils.js`. It logs
+`❌ Kesalahan di <context>: <error.message>` then **throws unconditionally**
+(either the original error when its message already reads like a failure, or a
+new `Error("Gagal <context>: <message>")` wrapped around it).
 
-```javascript
-/**
- * Generates configuration for the application
- * @param {string} configType - Type of configuration to create
- * @returns {Promise<void>}
- */
-async function generateConfig(configType) { ... }
-```
+Consequence: wrapping a body in `try/catch { handleError(...) }` preserves
+failure propagation — it does not swallow. `lib/generator/module/arch/*.arch.js`
+rely on this: invalid module names abort generation via this path.
 
-##### Function Parameters
-- Limit number of parameters (max 3-4)
-- If many parameters, use options object
+### 4.2 `ErrorHandler.handleError(error, context, shouldThrow = true)`
 
-```javascript
-// Correct
-function createUser({ name, email, password, role }) { ... }
+Class-based helper at `lib/generator/shared/error-handler.js`. Semantics of the
+third parameter:
 
-// Incorrect
-function createUser(name, email, password, role) { ... }
-```
+- `shouldThrow === true` (default): logs, writes to `logs/rakitin-errors.log`,
+  then **rethrows** the original error. Use for fatal paths.
+- `shouldThrow === false`: logs + records formatted info via `formatError`,
+  then **returns** `{ type, message, context, stack, details, timestamp }`.
+  All the `handleFileNotFoundError` / `handleModuleValidationError` /
+  `handleRouterIntegrationErrors` convenience statics use `shouldThrow=false`
+  so interactive flows can report multiple problems before bailing out.
 
-#### 5. Comments
+Rules:
 
-##### Language
-- Use **Indonesian** for all comments
-- Except for variable or function names that are already common in English
+- Library code never `process.exit()`s; only `bin/rakitin.js`'s `fail()` does,
+  after printing JSON (`{ ok:false, error }`) or human output.
+- Create typed errors with `ErrorHandler.createError(type, message, details)`
+  so `error.type` is set from `ERROR_TYPES`.
+- Never log-and-return `undefined` silently from catch blocks; either route
+  through one of the two handlers above or attach recovery behavior explicitly.
 
-```javascript
-// Correct
-// Mendapatkan data user dari database
-const userData = await User.findById(id);
+---
 
-// Incorrect
-// Get user data from database
-const userData = await User.findById(id);
-```
+## 5. Async rules
 
-##### Single-line Comments
-- Use `//` for single-line comments
-- Provide space after `//`
+- **Always `await` installer-family promises.** This is non-negotiable because
+  of a historic fire-and-forget bug: dependency installs were kicked off without
+  being awaited (the promise was dropped), so generators reported success and
+  exited while `npm install` was still running or had failed invisibly —
+  generated imports dangled against packages that were never installed.
+  Correct usage everywhere install happens:
 
-```javascript
-// Correct
-// Validasi input user
-if (!input) return false;
+  ```js
+  const installResult = await ensureDependencies(["middleware:auth"], {
+    silent: !!context.json,
+    pm: context.pm,
+  });
+  if (!installResult.success) { /* surface to caller */ }
+  ```
 
-// Incorrect
-//Validasi input user
-if (!input) return false;
-```
+  Same applies to raw installer calls: `await installer.installIfNeeded(...)`,
+  `await installer.executeWithRetry(...)`, `await internals.execCommand(...)`.
 
-##### Multi-line Comments
-- Use `/* ... */` for multi-line comments
+- Async functions return Promises for data (`{ success, installed, failed }`),
+  never mutate shared result objects across awaits.
+- Do not mix sync shell-outs (`execSync`) into new async paths except in the
+  legacy recipes scaffolding already reviewed; sync spawns block the event loop
+  and break the retry/spinner UX. New commands go through
+  `installer.executeWithRetry` → `internals.execCommand` (spawn-based).
+- Long-running generator work invoked from the command layer is wrapped with
+  `withSpinner(label, fn)` (`lib/commands/shared.js`) which no-ops cleanly in
+  non-TTY/JSON/Jest environments.
 
-```javascript
-/*
- * Fungsi ini digunakan untuk menghasilkan file konfigurasi
- * berdasarkan tipe yang dipilih oleh user
- */
-function generateConfig() { ... }
-```
+---
 
-#### 6. Error Handling
+## 6. Path resolution MUST be lazy
 
-##### Try-Catch
-- Use try-catch for asynchronous operations that might fail
-- Provide clear and informative error messages
+### The rule
 
-```javascript
-// Correct
-try {
-  const result = await someOperation();
-  return result;
-} catch (error) {
-  console.error(`Gagal melakukan operasi: ${error.message}`);
-  throw error;
+All conventional paths come from `getPaths(root)` snapshots or the getter-style
+exports in `lib/constants.js` — **evaluated at access time**. Destructuring at
+module load is forbidden:
+
+```js
+// ✅ correct
+function build() {
+  const p = getPaths();             // resolved NOW against current root
+  fs.writeFileSync(path.join(p.modulesPath, name, `${name}.service.js`), src);
 }
 
-// Incorrect
-try {
-  const result = await someOperation();
-  return result;
-} catch (err) {
-  console.log("Error");
-}
+// ❌ forbidden — frozen at require() time
+const { modulesPath } = require("../constants");
+const modulePath = path.join(modulesPath, name);   // captured-at-load constant
 ```
 
-##### Custom Errors
-- Create error classes for specific errors
-- Extend from standard Error class
+(For path *computation* against a known base, `utils.getCachedModulePath(name,
+basePath, type)` is fine — its cache key includes basePath.)
 
-```javascript
-class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
+### WHY — the test-cwd scenario
 
-// Usage
-throw new ValidationError("Input tidak valid");
-```
+The entire test harness points generation at a sandbox: `tests/setup.js`
+replaces `process.cwd` with a plain function returning a per-suite mkdtemp dir
+under `os.tmpdir()`. Sequence of events if paths were captured at load:
 
-#### 7. Promises and Asynchrony
+1. Jest loads the test file; requiring the module under test evaluates
+   `process.cwd()` once and stores e.g. `/repo/tests/unit/...`-rooted constants.
+2. Suite's tempDir override activates (or tests call something equivalent via
+   `--cwd`, which chdirs through `enterProjectRoot`).
+3. Generator resolves directories against the stale constant and writes into the
+   repository checkout instead of the sandbox — polluting the repo and leaving
+   tests green-or-flaky depending on write permissions.
+4. Parallel workers multiply the damage (races are precisely why each suite has
+   its own mkdtemp dir).
 
-##### Async/Await
-- Use async/await instead of .then/.catch
-- Always handle errors with try-catch
+With lazy getters every lookup happens *after* the cwd switch lands, so
+generators agree on one root without signature changes — this is also why
+`enterProjectRoot(ctx)` simply `process.chdir(ctx.cwd)`s instead of threading a
+`root` parameter through dozens of functions.
 
-```javascript
-// Correct
-async function getUserData() {
-  try {
-    const user = await User.findById(id);
-    return user;
-  } catch (error) {
-    console.error(`Gagal mendapatkan user: ${error.message}`);
-    throw error;
-  }
-}
+Historical note: older versions of `lib/constants.js` exported exactly those
+destructure-at-load constants; they were removed. Any reappearance in a diff is
+a regression, not modernization.
 
-// Incorrect
-function getUserData() {
-  return User.findById(id)
-    .then(user => user)
-    .catch(error => {
-      console.log("Error:", error);
-      throw error;
-    });
-}
-```
+---
 
-#### 8. Logging
+## 7. Generator code rules
 
-##### Logging Levels
-- Use console.error for errors
-- Use console.log for general information
-- Add emoji or prefix for easier identification
+Four hard gates apply to anything that emits project files:
 
-```javascript
-// Correct
-console.log("✅ Modul berhasil dibuat");
-console.error("❌ Gagal membuat modul");
+1. **All writes go through the safety layer.** Use
+   `safety.writeFileIfNotExistsSafe(filePath, content)` directly, or
+   `utils.writeFileIfNotExists` (the legacy alias delegating to
+   `safety.legacyWriteIfAbsent`) so existing code keeps dry-run/plan semantics.
+   Overwriting is only allowed via `safety.overwriteWithBackup` (creates
+   `<file>.bak`). Bare `fs.writeFileSync` on user-project files will not pass
+   review — the exceptions that exist (recipe `package.json` script merge,
+   `.env.example` appending in `mergeEnvExample`) are deliberate, append-only
+   operations.
+2. **Generated identifiers via `toIdentifier()`.** Every place a user-supplied
+   string becomes a JS identifier in emitted source
+   (`const ${id} = require(...)` etc.) uses
+   `toIdentifier(name, { casing })`. It strips illegal characters, prefixes
+   `_` on digit-leading results, and appends `_` to reserved words
+   (`RESERVED_WORDS`). Kebab `require` paths meanwhile use
+   `normalizeModuleName`/`getModuleVariants().kebab`.
+3. **Generated dependencies via `KIND_DEPENDENCIES`.** If your generated output
+   requires npm packages, register a kind key in `lib/deps/manifest.js` and let
+   the command layer call `ensureDependencies([kind], { pm })`. No inline
+   `npm install` strings, no shell-outs from generator bodies.
+4. **`vm.Script` self-check for new codegen.** Every new generator ships with a
+   compile gate proving its output parses:
+   ```js
+   const vm = require("node:vm");
+   expect(() => new vm.Script(generatedSource)).not.toThrow();
+   ```
+   placed in `tests/regression/` (policy suite) or a dedicated suite under
+   `tests/lib/generator/`. Fragments referencing unresolved user-project
+   modules may strip/substitute `require(...)` calls first (pattern used in
+   `arch.test.js` / `config-router.test.js`) but syntax checking itself is not
+   optional.
 
-// Incorrect
-console.log("Module created successfully");
-console.error("Failed to create module");
-```
+Also: keep generated templates self-contained unless they legitimately require
+a project-local module. The auto-router embeds its own mini
+`normalizeModuleName`/`toIdentifier` helpers precisely so generated code works
+inside the *user's* project, not just inside rakitin. Pure content builders
+(`buildRoutesContent(existing, lines)`) should stay pure to remain dry-run-safe.
 
-### rakitin-Specific Standards
+---
 
-#### 1. Generator Structure
+## 8. Test rules
 
-##### Generator Files
-- Each generator should have a main file with an appropriate name
-- File should be in directory `lib/generator/[type]/[name].js`
+1. **Real fs against `global.tempDir`; no fs mocks.** Suites generate into the
+   per-suite mkdtemp directory created by `tests/setup.js` and assert against
+   actual disk state (`fs.existsSync`, reading files back, snapshotting bytes).
+   Mocking the filesystem makes lazy-path bugs (§6) untestable and hides
+   mkdir/write mode errors. In particular: **never `jest.mock('fs-extra')` in
+   new suites** — the shared setup itself depends on real fs-extra semantics,
+   and mocked fs leaks across a suite's lifecycle faster than it can be undone.
+2. **No process-level `jest.fn` for `process.cwd`.** The cwd override installed
+   by setup.js is a plain closure (`process.cwd = () => tempDir`) restored in
+   `afterAll`. Reason: jest.config deliberately uses `clearMocks: true` +
+   `resetMocks: false` — global resets that stripped implementations caused
+   order-dependent failures elsewhere; a mocked `cwd` could end up returning
+   `undefined` mid-suite. Tests that need another root should create nested dirs
+   inside `tempDir` or pass explicit roots to APIs accepting them.
+3. **Per-suite cleanup expectations.** Relying on the shared hooks is required:
+   - `beforeAll`/`afterAll` own directory creation/removal (don't delete
+     `tempDir` itself mid-suite);
+   - `afterEach` empties contents, runs `jest.clearAllMocks()`, resets Logger
+     instances (`Logger.clearInstances()`) and clears `utils.clearPathCache()`;
+   - Anything else you mutate globally (e.g. swapping `installer.internals`)
+     is saved and restored by YOUR suite in `afterAll`, following the
+     `savedInternals = { ...installer.internals }` pattern from
+     `tests/lib/installer.test.js`.
+4. **No network, ever.** Shell/package-manager execution goes through
+   `installer.internals`, so stub it instead of touching child processes:
 
-```javascript
-// Correct structure
-lib/generator/config/config.js
-lib/generator/module/module.js
-lib/generator/middleware/middleware.js
-```
+   ```js
+   installer.internals.execCommand = jest.fn().mockResolvedValue({
+     stdout: "", stderr: "", code: 0,
+   });
+   installer.internals.isPackageInstalled = jest.fn()
+     .mockReturnValue(true); // or false to simulate missing packages
+   ```
 
-##### Generator Functions
-- Each generator should export a main function named `generate[Name]`
-- Function should be async
-- Should have input validation
-- Should have error handling
+   `installIfNeeded` filters through `internals.isPackageInstalled` and executes
+   through `internals.execCommand`, so these two lines cover every codepath
+   deterministically (see `tests/lib/installer.test.js`).
+5. **Prompt-driven flows are tested headlessly** — exercise the non-interactive
+   core function or drive `addCommand(thing, name, ctx)` with fully-populated
+   context (`yes: true`) rather than scripting stdin/inquirer mocks.
+6. Coverage is collected automatically (`collectCoverageFrom` covers `lib/**`,
+   `bin/**`, `index.js`); keep assertions specific rather than chasing the
+   percentage.
 
-```javascript
-/**
- * Generator for configuration
- * @returns {Promise<void>}
- */
-async function generateConfig() {
-  try {
-    // Input validation
-    if (!input) {
-      throw new Error("Input tidak boleh kosong");
-    }
-    
-    // Generator logic
-    // ...
-    
-    console.log("✅ Konfigurasi berhasil dibuat");
-  } catch (error) {
-    console.error(`❌ Gagal membuat konfigurasi: ${error.message}`);
-    throw error;
-  }
-}
+---
 
-module.exports = generateConfig;
-```
+## 9. Formatting
 
-#### 2. Interactive Prompts
+Current source conventions (enforced by review until tooling lands):
 
-##### Prompt Structure
-- Use inquirer for interactive prompts
-- Group related prompts
-- Provide clear and descriptive messages
+- **Indentation:** 2 spaces, no tabs.
+- **Quotes:** double quotes in `lib/` (+ `"use"` of double quotes inside
+  generated output too); some generator/shared files retain single quotes from
+  legacy — do not churn unrelated lines, but new code uses doubles.
+- **Semicolons:** always, including on multi-line expressions.
+- **Arrow preference:** arrows for callbacks and small lambdas;
+  `function` declarations are fine for hoisted top-level helpers (the installer
+  relies on declaration hoisting when populating `internals`).
+- Template literals for any multi-line emitted code; escape backticks/`${}`
+  carefully inside generated sources.
+- Trailing newline at EOF; JSON artifacts written by generators are serialized
+  with `JSON.stringify(obj, null, 2) + "\n"`.
 
-```javascript
-// Correct
-const { configType, customName } = await inquirer.default.prompt([
-  {
-    type: "list",
-    name: "configType",
-    message: "Pilih jenis config yang ingin dibuat:",
-    choices: ["app", "database", "jwt"],
-  },
-  {
-    type: "input",
-    name: "customName",
-    message: "Nama config custom:",
-    when: (answers) => answers.configType === "custom",
-  },
-]);
-```
-
-#### 3. Utilities
-
-##### Utility Functions
-- Place utility functions in `lib/utils.js`
-- Provide JSDoc for each function
-- Create reusable functions
-
-```javascript
-/**
- * Memastikan sebuah direktori ada. Jika tidak, direktori akan dibuat.
- * @param {string} dir Path ke direktori.
- */
-function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-}
-```
-
-#### 4. Constants
-
-##### Constant Definitions
-- Place all constants in `lib/constants.js`
-- Use path.join for cross-platform compatibility
-
-```javascript
-const path = require("path");
-
-const basePath = path.join(process.cwd(), "app");
-const modulesPath = path.join(basePath, "modules");
-const sharedPath = path.join(basePath, "shared");
-
-module.exports = {
-  basePath,
-  modulesPath,
-  sharedPath,
-};
+Prettier integration is scheduled for **Phase 6**; when it lands it will codify
+print width and quote/arrow settings mechanically — until then, match the file
+you are editing and resist formatting-only reflows bundled into functional PRs.

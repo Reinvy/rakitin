@@ -1,0 +1,1 @@
+{"name":"rakitin-example-advanced","private":true,"scripts":{},"dependencies":{"express":"^4.19.2","joi":"^18.2.5","jsonwebtoken":"^9.0.3","swagger-jsdoc":"^6.3.0","swagger-ui-express":"^5.0.1"}}

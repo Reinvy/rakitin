@@ -50,30 +50,30 @@ Dengan mengimplementasikan strategi ini, proyek rakitin akan:
 
 ### Informasi Proyek
 - **Nama Proyek**: rakitin
-- **Versi Saat Ini**: 1.0.0
+- **Versi Saat Ini**: 2.0.0
 - **Lisensi**: MIT
 - **Repository**: https://github.com/Reinvy/rakitin
 - **Bahasa Utama**: JavaScript (Node.js)
 - **Status**: Open Source, aktif dikembangkan
 
 ### Fitur Utama
-- Generator untuk modul dengan dua pilihan arsitektur (Simple dan Modular)
-- Integrasi dengan beberapa ORM (Prisma, Sequelize, Mongoose, TypeORM)
-- Generator untuk middleware, utilitas, dan konfigurasi
-- Integrasi router utama (masih dalam pengembangan)
+- Command surface v2: `init` / `add` / `recipe` / `integrate` / `doctor` / `info` / `list`
+  plus interactive legacy menu
+- Generator modul dua arsitektur (Simple & Modular) dengan ORM opsional per jenis
+- Mode headless penuh (`--json`, flags) untuk CI dan AI agent
+- Integrasi router utama berbasis marker idempotent dengan backup `.bak`
+- Recipes tingkat advanced: auth, swagger, test, docker
 
 ### Infrastruktur Saat Ini
-- CI/CD dasar dengan GitHub Actions
-- Testing dengan Jest
+- CI/CD GitHub Actions (test + lint + typecheck job)
+- Testing Jest disk-based (>320 test, suite regression sebagai guard kebijakan)
 - Dukungan multi-platform (Windows, macOS, Linux)
-- Dukungan multi-versi Node.js (14.x, 16.x, 18.x, 20.x)
+- Dukungan Node.js >=18 (runtime inquirer v12)
 
 ### Tantangan Saat Ini
-- Fitur Integrasi Router Utama masih dalam pengembangan
-- Belum ada sistem pengujian yang komprehensif
-- Belum ada standar rilis yang formal
-- Dokumentasi perlu ditingkatkan
-- Komunitas masih dalam tahap pertumbuhan awal
+- Onboarding kontributor eksternal pertama
+- Migrasi bertahap template inline generator → file `.ejs`
+- Review periodik akurasi dokumen roadmap terhadap kenyataan
 
 ---
 
