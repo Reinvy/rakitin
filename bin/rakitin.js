@@ -211,9 +211,15 @@ const cli = yargs
     }
   )
 
-  .command("list", "Katalog generator yang tersedia", {}, () => {
+  .command("list", "Katalog generator yang tersedia", {}, (argv) => {
     const { listCommand } = require("../lib/commands/info");
     const { catalog } = listCommand();
+
+    if (argv.json) {
+      process.stdout.write(`${JSON.stringify({ catalog }, null, 2)}\n`);
+      return;
+    }
+
     catalog.forEach((item) => {
       console.log(`• ${item.command.padEnd(28)} — ${item.desc}`);
       console.log(

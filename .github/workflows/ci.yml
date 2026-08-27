@@ -100,7 +100,7 @@ jobs:
       run: |
         SMOKE_DIR="$(mktemp -d)"
         cd "$SMOKE_DIR"
-        echo '{"name":"smoke-demo","dependencies":{"express":"^4.19.2"}}' > package.json
+        echo '{"name":"smoke-demo"}' > package.json
 
         node "$GITHUB_WORKSPACE/bin/rakitin.js" list --json | grep '"command"'
         node "$GITHUB_WORKSPACE/bin/rakitin.js" info --json | grep 'packageManager'
@@ -108,7 +108,9 @@ jobs:
         test ! -d app/modules/smoke-mod || { echo "dry-run leaked to disk"; exit 1; }
         node "$GITHUB_WORKSPACE/bin/rakitin.js" add module smoke-mod --arch modular --orm none --yes --json >/dev/null
         node "$GITHUB_WORKSPACE/bin/rakitin.js" integrate --json >/dev/null
-        node -e "require('./app/routes/index.js')" && echo "router parses"
+        # Generated router must at least PARSE as JS (no deps needed for --check)
+        node --check app/routes/index.js
+        node --check app/modules/smoke-mod/routes/smoke-mod.router.js
         node "$GITHUB_WORKSPACE/bin/rakitin.js" doctor
 
   build:
