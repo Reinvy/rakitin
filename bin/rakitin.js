@@ -96,26 +96,35 @@ const cli = yargs
     "Generate komponen (module|middleware|util|config|endpoint|validation|docs)",
     {},
     async (argv) => {
+      await runAdd(argv);
+    }
+  )
+
+  /* recipes ------------------------------------------------------------ */
+  .command(
+    "recipe <name>",
+    "Composite advanced-tier: auth|swagger|test|docker",
+    {},
+    async (argv) => {
       const ctx = buildContext(argv);
       enterProjectRoot(ctx);
       if (ctx.json) enableJsonMode();
       if (ctx.dryRun) safety.beginPlan();
 
       try {
-        // `util` still uses its dedicated interactive flow (rich kind menu);
-        // everything else supports full headless generation.
-        let result;
-        if (argv.thing === "util") {
-          const generateUtilModule = require("../lib/generator/util/util");
-          const generateUtil = generateUtilModule.generateUtil || generateUtilModule;
-          result = await generateUtil();
-          result = result || {};
-        } else {
-          const { addCommand } = require("../lib/commands/add");
-          result = await addCommand(argv.thing, argv.name, ctx);
-        }
+        const { recipeCommand } = require("../lib/commands/recipe");
+        const result = await recipeCommand(argv.name, {
+          arch: ctx.arch,
+          pm: ctx.pm,
+        });
 
-        printResult({ ...result, plan: ctx.dryRun ? safety.getPlan() : undefined });
+        printResult({
+          ...result,
+          created: result?.createdFiles?.map((p) =>
+            typeof p === "string" ? p : p.path
+          ),
+          plan: ctx.dryRun ? safety.getPlan() : undefined,
+        });
         safety.resetPlan();
       } catch (err) {
         safety.resetPlan();
@@ -207,6 +216,44 @@ const cli = yargs
 if (!process.argv.slice(2).length) {
   banner();
   require("../index.js");
+}
+
+/** Shared handler for `rakitin add <thing> [name]`. */
+async function runAdd(argv) {
+  const ctx = buildContext(argv);
+  enterProjectRoot(ctx);
+  if (ctx.json) enableJsonMode();
+  if (ctx.dryRun) safety.beginPlan();
+
+  try {
+    // `util` still uses its dedicated interactive flow (rich kind menu);
+    // everything else supports full headless generation.
+    let result;
+    if (argv.thing === "util") {
+      const utilModule = require("../lib/generator/util/util");
+      const generateUtil = utilModule.generateUtil || utilModule;
+      result = (await generateUtil()) || {};
+    } else if (argv.thing === "recipe") {
+      // Convenience alias: rakitin add recipe <name>
+      const { recipeCommand } = require("../lib/commands/recipe");
+      result = await recipeCommand(argv.name, { arch: ctx.arch, pm: ctx.pm });
+    } else {
+      const { addCommand } = require("../lib/commands/add");
+      result = await addCommand(argv.thing, argv.name, ctx);
+    }
+
+    printResult({
+      ...result,
+      createdFiles: result?.createdFiles?.map((p) =>
+        typeof p === "string" ? p : p.path
+      ),
+      plan: ctx.dryRun ? safety.getPlan() : undefined,
+    });
+    safety.resetPlan();
+  } catch (err) {
+    safety.resetPlan();
+    fail(err, ctx.json);
+  }
 }
 
 function runLegacyGenerator(fn) {
