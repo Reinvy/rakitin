@@ -80,7 +80,14 @@ const cli = yargs
   .command(
     "init",
     "Deteksi proyek & tulis konfigurasi .rakitinrc.json",
-    {},
+    {
+      preset: { type: "string", choices: ["basic", "intermediate", "advanced"] },
+      orm: {
+        type: "string",
+        choices: ["prisma", "sequelize", "mongoose", "typeorm", "none"],
+      },
+      arch: { type: "string", choices: ["simple", "modular"] },
+    },
     async (argv) => {
       const ctx = buildContext(argv);
       enterProjectRoot(ctx);
@@ -88,7 +95,9 @@ const cli = yargs
       try {
         const { initCommand } = require("../lib/commands/init");
         const result = await initCommand({
-          preset: argv.preset,
+          preset: argv.preset || ctx.preset,
+          orm: argv.orm,
+          arch: argv.arch || ctx.arch,
           force: Boolean(ctx.overwrite),
         });
         printResult({
@@ -96,8 +105,8 @@ const cli = yargs
           skipped: result.created ? [] : [result.configFile],
           nextSteps: [
             result.created
-              ? `Preset aktif: ${result.preset}`
-              : `Konfigurasi sudah ada (preset: ${result.preset})`,
+              ? `Preset aktif: ${result.preset} (ORM: ${result.orm})`
+              : `Konfigurasi sudah ada (preset: ${result.preset}, ORM: ${result.orm})`,
             "Jalankan: rakitin doctor untuk health-check",
           ],
         });
@@ -132,6 +141,7 @@ const cli = yargs
         const { recipeCommand } = require("../lib/commands/recipe");
         const result = await recipeCommand(argv.name, {
           arch: ctx.arch,
+          orm: ctx.orm,
           pm: ctx.pm,
         });
 
@@ -264,7 +274,11 @@ async function runAdd(argv) {
     } else if (argv.thing === "recipe") {
       // Convenience alias: rakitin add recipe <name>
       const { recipeCommand } = require("../lib/commands/recipe");
-      result = await recipeCommand(argv.name, { arch: ctx.arch, pm: ctx.pm });
+      result = await recipeCommand(argv.name, {
+        arch: ctx.arch,
+        orm: ctx.orm,
+        pm: ctx.pm,
+      });
     } else {
       const { addCommand } = require("../lib/commands/add");
       result = await addCommand(argv.thing, argv.name, ctx);

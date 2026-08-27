@@ -102,22 +102,24 @@ Detects the project and writes `.rakitinrc.json`; idempotent without
 
 ```bash
 # Synopsis
-rakitin init [--preset basic|intermediate|advanced] [--overwrite] [--cwd DIR]
+rakitin init [--preset basic|intermediate|advanced] [--orm prisma|sequelize|mongoose|typeorm|none] [--overwrite] [--cwd DIR]
 ```
 
 | Option | Effect |
 | --- | --- |
 | `--preset` | Force preset; unknown values abort. Omitted ⇒ auto-preset: any ORM installed ⇒ `intermediate`, else `basic`. |
+| `--orm` | Set project-wide default ORM (persisted in `.rakitinrc.json`). Choices: `prisma` (default), `sequelize`, `mongoose`, `typeorm`, `none`. |
 | `--overwrite/-o` | Regenerate config even if present (acts as `force`). |
 | `--json` | Standard object. Dry-run not honored here. |
 
-Written shape: `$schema`, `preset`, `version: 2`,
+Written shape: `$schema`, `preset`, `orm`, `defaultArchitecture`, `version: 2`,
 `detected {expressVersion, packageManager, modules, mixedArchitectures}`,
 `generatedAt`. Detection trusts per-module structure, so mixed layouts are
 reported honestly (see [tiers](./integration-tiers.md#1-the-three-tiers-at-a-glance)).
 
 ```bash
-rakitin init                                   # auto-preset baseline
+rakitin init                                   # auto-preset baseline (defaults to Prisma)
+rakitin init --orm sequelize                   # configure Sequelize as the project default ORM
 rakitin init --preset advanced --overwrite     # explicit, regenerating
 CI=true rakitin init --preset basic --json | jq -e '.ok == true'   # CI check
 PLAN=$(rakitin init --preset intermediate --json); echo "$PLAN" | jq -r '.nextSteps[]'   # agent
@@ -136,9 +138,9 @@ rakitin add module <name> [--arch simple|modular] \
 
 Options: `<name>` normalized to kebab-case directories (`User Profile` →
 `user-profile`) and required even under `--yes`; `--arch` default
-`modular`; `--orm` default `none`; missing flags trigger the fill-in
+`modular`; `--orm` defaults to configured project ORM or `prisma`; missing flags trigger the fill-in
 prompts keyed `moduleName` → `architecture` (Simple|Modular) → `useORM`
-(confirm, default true) → `ormChoice` (…|None).
+(confirm, default true) → `ormChoice` (Prisma|Sequelize|Mongoose|TypeORM|None).
 
 Behavior:
 

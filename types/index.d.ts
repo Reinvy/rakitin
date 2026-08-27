@@ -102,6 +102,7 @@ export interface RakitinConfig {
   // Architecture defaults
   defaultArchitecture: ArchitectureType;
   defaultORM: ORMType;
+  orm?: string;
 
   // Router settings
   autoIntegrateRouter: boolean;

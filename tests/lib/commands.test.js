@@ -34,7 +34,7 @@ describe("buildContext", () => {
 });
 
 describe("initCommand", () => {
-  test("writes .rakitinrc.json with auto-selected preset", async () => {
+  test("writes .rakitinrc.json with auto-selected preset and default orm prisma", async () => {
     const result = await initCommand();
     const cfgPath = path.join(global.tempDir, ".rakitinrc.json");
 
@@ -43,7 +43,23 @@ describe("initCommand", () => {
 
     const cfg = fs.readJsonSync(cfgPath);
     expect(["basic", "intermediate"]).toContain(cfg.preset);
+    expect(cfg.orm).toBe("prisma");
     expect(cfg.version).toBe(2);
+  });
+
+  test("writes .rakitinrc.json with explicit orm option", async () => {
+    const result = await initCommand({ orm: "sequelize", force: true });
+    const cfgPath = path.join(global.tempDir, ".rakitinrc.json");
+
+    expect(result.created).toBe(true);
+    const cfg = fs.readJsonSync(cfgPath);
+    expect(cfg.orm).toBe("sequelize");
+  });
+
+  test("rejects unknown orm", async () => {
+    await expect(initCommand({ orm: "invalid-orm", force: true })).rejects.toThrow(
+      /ORM tidak dikenal/
+    );
   });
 
   test("idempotent without force; auto-preset preserved", async () => {
@@ -71,6 +87,55 @@ describe("addCommand headless", () => {
       name: "headless-demo",
       dependencies: { express: "^4.0.0" },
     });
+  });
+
+  test("module defaults to Prisma when --orm is omitted", async () => {
+    const ctx = shared.buildContext({
+      yes: true,
+      arch: "modular",
+      install: false,
+    });
+
+    await addCommand("module", "article", ctx);
+
+    const modDir = path.join(global.tempDir, "app", "modules", "article");
+    expect(fs.existsSync(path.join(modDir, "services", "article.service.js"))).toBe(true);
+    // Prisma model and singleton must be generated
+    expect(
+      fs.existsSync(path.join(global.tempDir, "prisma", "schema", "article.prisma"))
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(global.tempDir, "app", "shared", "config", "db.js"))
+    ).toBe(true);
+  });
+
+  test("module respects orm configured in .rakitinrc.json", async () => {
+    fs.outputJsonSync(path.join(global.tempDir, ".rakitinrc.json"), {
+      preset: "basic",
+      orm: "sequelize",
+      version: 2,
+    });
+
+    const ctx = shared.buildContext({
+      yes: true,
+      arch: "modular",
+      install: false,
+    });
+
+    await addCommand("module", "order", ctx);
+
+    expect(
+      fs.existsSync(
+        path.join(
+          global.tempDir,
+          "app",
+          "modules",
+          "order",
+          "models",
+          "order.model.js"
+        )
+      )
+    ).toBe(true);
   });
 
   test("module with all flags runs with ZERO prompts", async () => {

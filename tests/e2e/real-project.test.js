@@ -91,6 +91,7 @@ describe("Real Project E2E Suite (tests/project)", () => {
     expect(fs.existsSync(rcPath)).toBe(true);
     const rc = fs.readJsonSync(rcPath);
     expect(rc.preset).toBe("basic");
+    expect(rc.orm).toBe("prisma");
   });
 
   test("E2E: rakitin add module (modular & simple)", () => {
@@ -142,6 +143,8 @@ describe("Real Project E2E Suite (tests/project)", () => {
     let res = runCLI(["recipe", "auth", "--arch", "modular", "--json"]);
     expect(res.status).toBe(0);
     expect(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/middlewares/auth.middleware.js"))).toBe(true);
+    expect(fs.existsSync(path.join(TEST_PROJECT_DIR, "prisma/schema/user.prisma"))).toBe(true);
+    expect(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/config/db.js"))).toBe(true);
 
     res = runCLI(["recipe", "docker", "--json"]);
     expect(res.status).toBe(0);

@@ -153,7 +153,7 @@ async function main() {
     assert(data.catalog.length >= 8, "Catalog harus memiliki generator yang terdaftar");
   });
 
-  // E2E-02: rakitin init (basic preset)
+  // E2E-02: rakitin init (basic preset & default prisma ORM)
   runScenario("E2E-02", "rakitin init --preset basic", () => {
     const res = runCLI(["init", "--preset", "basic", "--json"]);
     assert(res.status === 0, `Exit code ${res.status}: ${res.stderr}`);
@@ -161,15 +161,17 @@ async function main() {
     assert(fs.existsSync(rcPath), ".rakitinrc.json harus dibuat");
     const rc = fs.readJsonSync(rcPath);
     assert(rc.preset === "basic", `Preset harus 'basic', didapat: ${rc.preset}`);
+    assert(rc.orm === "prisma", `ORM default harus 'prisma', didapat: ${rc.orm}`);
   });
 
-  // E2E-03: rakitin init idempotency & overwrite
+  // E2E-03: rakitin init idempotency & overwrite with --orm
   runScenario("E2E-03", "rakitin init overwrite/force", () => {
     runCLI(["init", "--preset", "basic"]);
-    const res = runCLI(["init", "--preset", "advanced", "--overwrite", "--json"]);
+    const res = runCLI(["init", "--preset", "advanced", "--orm", "sequelize", "--overwrite", "--json"]);
     assert(res.status === 0, `Exit code ${res.status}: ${res.stderr}`);
     const rc = fs.readJsonSync(path.join(TEST_PROJECT_DIR, ".rakitinrc.json"));
     assert(rc.preset === "advanced", `Preset harus terupdate menjadi 'advanced', didapat: ${rc.preset}`);
+    assert(rc.orm === "sequelize", `ORM harus terupdate menjadi 'sequelize', didapat: ${rc.orm}`);
   });
 
   // E2E-04: rakitin add module (Modular, No ORM)
@@ -317,6 +319,8 @@ async function main() {
     assert(res.status === 0, `Recipe auth failed: ${res.stderr}`);
     assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/middlewares/auth.middleware.js")), "auth.middleware.js harus ada");
     assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/user/routes/user.router.js")), "user module harus ada");
+    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "prisma/schema/user.prisma")), "user.prisma harus ada");
+    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/config/db.js")), "db.js harus ada");
     assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/validators/user.validator.js")), "user.validator.js harus ada");
     const envExample = fs.readFileSync(path.join(TEST_PROJECT_DIR, ".env.example"), "utf8");
     assert(envExample.includes("JWT_SECRET="), "JWT_SECRET harus ada di .env.example");

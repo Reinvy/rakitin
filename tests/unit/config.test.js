@@ -19,7 +19,7 @@ describe("Config", () => {
   describe("constructor", () => {
     it("should create config with default values", () => {
       expect(config.get("defaultArchitecture")).toBe("modular");
-      expect(config.get("defaultORM")).toBe("None");
+      expect(config.get("defaultORM")).toBe("Prisma");
     });
 
     it("should merge initial config", () => {

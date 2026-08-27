@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Configurable ORM in `rakitin init`**: `rakitin init --orm <prisma|sequelize|mongoose|typeorm|none>` configures and saves the default ORM stack into `.rakitinrc.json`.
+- **Default Prisma ORM**: All module generators (`rakitin add module`), composite recipes (`rakitin recipe auth`), and interactive menus now default to **Prisma** unless configured or overridden via `--orm`.
+
 ## [2.0.0] - 2026-08-27
 
 Integration-first rewrite ("detect-first, never destructive") with a new
