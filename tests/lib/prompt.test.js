@@ -38,7 +38,7 @@ describe("Prompt", () => {
     expect(questions).toHaveLength(1);
 
     const q = questions[0];
-    expect(q.type).toBe("list");
+    expect(q.type).toBe("select");
     expect(q.name).toBe("feature");
 
     const values = q.choices
