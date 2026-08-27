@@ -106,7 +106,7 @@
     "ejs": "^3.1.10",
     "inquirer": "^14.1.0",
     "mongoose": "^9.9.4",
-    "prisma": "^8.0.0-rc.12",
+    "prisma": "^7.10.0",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
