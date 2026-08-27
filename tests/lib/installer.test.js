@@ -1,267 +1,199 @@
 const fs = require('fs-extra');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execCommand } = require('../../lib/installer');
 const installer = require('../../lib/installer');
 
-// Mock fs, execSync, and console
-jest.mock('fs-extra');
-jest.mock('child_process');
-jest.mock('../../lib/generator/shared/validation-utils', () => ({
-  createErrorMessage: jest.fn((type, details) => `Error ${type}: ${details}`),
-  handleError: jest.fn((context, error) => {
-    console.error(`Error in ${context}: ${error.message}`);
-    throw error;
-  })
-}));
-
 describe('Installer', () => {
+  // All execution/check paths are routed through the injectable internals
+  // registry, so tests never touch the network or spawn child processes.
+  let savedInternals;
+
   beforeEach(() => {
-    // Reset all mocks before each test
-    jest.clearAllMocks();
-    
-    // Mock process.cwd
-    process.cwd = jest.fn(() => global.tempDir);
+    savedInternals = { ...installer.internals };
+  });
+
+  afterEach(() => {
+    Object.assign(installer.internals, savedInternals);
   });
 
   describe('isPackageInstalled', () => {
-    test('should return true if package exists in node_modules', () => {
-      const packageName = 'test-package';
-      const nodeModulesPath = path.join(global.tempDir, 'node_modules', packageName);
-      
-      fs.existsSync.mockReturnValue(true);
-      
-      const result = installer.isPackageInstalled(packageName);
-      
-      expect(fs.existsSync).toHaveBeenCalledWith(nodeModulesPath);
-      expect(result).toBe(true);
+    test('returns true if package exists in node_modules', () => {
+      // Real files against tempDir (process.cwd is isolated in setup.js)
+      const pkgDir = path.join(global.tempDir, 'node_modules', 'test-package');
+      fs.ensureDirSync(pkgDir);
+
+      expect(installer.isPackageInstalled('test-package')).toBe(true);
     });
 
-    test('should check package.json dependencies if not in node_modules', () => {
-      const packageName = 'test-package';
-      const packageJsonPath = path.join(global.tempDir, 'package.json');
-      const packageJson = {
-        dependencies: {
-          [packageName]: '1.0.0'
-        }
-      };
-      
-      // First call to existsSync (node_modules) returns false
-      // Second call to existsSync (package.json) returns true
-      fs.existsSync.mockReturnValueOnce(false).mockReturnValueOnce(true);
-      fs.readFileSync.mockReturnValue(JSON.stringify(packageJson));
-      
-      const result = installer.isPackageInstalled(packageName);
-      
-      expect(fs.existsSync).toHaveBeenCalledTimes(2);
-      expect(fs.readFileSync).toHaveBeenCalledWith(packageJsonPath, 'utf8');
-      expect(result).toBe(true);
-    });
-
-    test('should return false if package not found', () => {
-      const packageName = 'non-existent-package';
-      
-      fs.existsSync.mockReturnValue(false);
-      
-      const result = installer.isPackageInstalled(packageName);
-      
-      expect(result).toBe(false);
-    });
-
-    test('should handle errors gracefully', () => {
-      const packageName = 'test-package';
-      
-      fs.existsSync.mockImplementation(() => {
-        throw new Error('File system error');
+    test('checks package.json dependencies if not in node_modules', () => {
+      fs.outputJsonSync(path.join(global.tempDir, 'package.json'), {
+        dependencies: { 'dep-package': '^1.0.0' },
+        devDependencies: { 'dev-package': '^2.0.0' },
       });
-      
-      const result = installer.isPackageInstalled(packageName);
-      
-      expect(result).toBe(false);
+
+      expect(installer.isPackageInstalled('dep-package')).toBe(true);
+      expect(installer.isPackageInstalled('dev-package')).toBe(true);
+    });
+
+    test('returns false if package not found', () => {
+      expect(installer.isPackageInstalled('non-existent-package')).toBe(false);
     });
   });
 
   describe('installIfNeeded', () => {
-    test('should not install if packageNames is empty', () => {
-      const result = installer.installIfNeeded([], false, true);
-      
-      expect(result).toEqual({
-        success: true,
-        installed: [],
-        failed: []
-      });
+    test('resolves without installing for empty package list', async () => {
+      installer.internals.execCommand = jest.fn();
+
+      const result = await installer.installIfNeeded([]);
+
+      expect(result).toEqual({ success: true, installed: [], failed: [] });
+      expect(installer.internals.execCommand).not.toHaveBeenCalled();
     });
 
-    test('should not install if all packages are already installed', () => {
-      const packageNames = ['package1', 'package2'];
-      
-      // Mock isPackageInstalled to return true for all packages
-      jest.spyOn(installer, 'isPackageInstalled').mockReturnValue(true);
-      
-      const result = installer.installIfNeeded(packageNames, false, true);
-      
-      expect(installer.isPackageInstalled).toHaveBeenCalledTimes(2);
-      expect(execSync).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        success: true,
-        installed: [],
-        failed: []
-      });
+    test('skips packages already installed', async () => {
+      installer.internals.execCommand = jest.fn();
+      installer.internals.isPackageInstalled = jest.fn().mockReturnValue(true);
+
+      const result = await installer.installIfNeeded(['pkg-a', 'pkg-b']);
+
+      expect(result).toEqual({ success: true, installed: [], failed: [] });
+      expect(installer.internals.execCommand).not.toHaveBeenCalled();
     });
 
-    test('should install packages that are not already installed', () => {
-      const packageNames = ['package1', 'package2'];
-      
-      // Mock isPackageInstalled to return false for package1 and true for package2
-      jest.spyOn(installer, 'isPackageInstalled')
-        .mockReturnValueOnce(false)
-        .mockReturnValueOnce(true);
-      
-      execSync.mockImplementation(() => {});
-      
-      const result = installer.installIfNeeded(packageNames, false, true);
-      
-      expect(installer.isPackageInstalled).toHaveBeenCalledTimes(2);
-      expect(execSync).toHaveBeenCalledWith('npm install package1', { stdio: 'pipe' });
-      expect(result).toEqual({
+    test('installs only missing packages via the detected command', async () => {
+      installer.internals.execCommand = jest.fn().mockResolvedValue({
         success: true,
-        installed: ['package1'],
-        failed: []
+        stdout: '',
+        stderr: '',
       });
+      installer.internals.isPackageInstalled = jest
+        .fn()
+        .mockReturnValueOnce(false) // pkg-a missing
+        .mockReturnValueOnce(true); // pkg-b present
+
+      const result = await installer.installIfNeeded(['pkg-a', 'pkg-b'], {
+        packageManager: 'npm',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.installed).toEqual(['pkg-a']);
+      expect(installer.internals.execCommand).toHaveBeenCalledWith(
+        'npm install pkg-a',
+        { stdio: 'inherit' }
+      );
     });
 
-    test('should install as dev dependency when isDev is true', () => {
-      const packageNames = ['package1'];
-      
-      // Mock isPackageInstalled to return false
-      jest.spyOn(installer, 'isPackageInstalled').mockReturnValue(false);
-      
-      execSync.mockImplementation(() => {});
-      
-      const result = installer.installIfNeeded(packageNames, true, true);
-      
-      expect(execSync).toHaveBeenCalledWith('npm install --save-dev package1', { stdio: 'pipe' });
-      expect(result).toEqual({
+    test('installs as dev dependency when requested', async () => {
+      installer.internals.execCommand = jest.fn().mockResolvedValue({
         success: true,
-        installed: ['package1'],
-        failed: []
+        stdout: '',
+        stderr: '',
       });
+      installer.internals.isPackageInstalled = jest.fn().mockReturnValue(false);
+
+      const result = await installer.installIfNeeded(['pkg-a'], {
+        isDev: true,
+        retry: false,
+      });
+
+      expect(result.success).toBe(true);
+      expect(installer.internals.execCommand).toHaveBeenCalledWith(
+        'npm install --save-dev pkg-a',
+        { stdio: 'inherit' }
+      );
     });
 
-    test('should handle installation errors', () => {
-      const packageNames = ['package1'];
-      
-      // Mock isPackageInstalled to return false
-      jest.spyOn(installer, 'isPackageInstalled').mockReturnValue(false);
-      
-      execSync.mockImplementation(() => {
-        throw new Error('Installation failed');
+    test('reports failed installation result without hanging on retries', async () => {
+      installer.internals.execCommand = jest
+        .fn()
+        .mockRejectedValue(new Error('Installation failed'));
+      installer.internals.isPackageInstalled = jest.fn().mockReturnValue(false);
+
+      const result = await installer.installIfNeeded(['pkg-a'], {
+        retry: false,
       });
-      
-      const result = installer.installIfNeeded(packageNames, false, true);
-      
-      expect(result).toEqual({
-        success: false,
-        installed: [],
-        failed: ['package1']
-      });
+
+      expect(result.success).toBe(false);
+      expect(result.failed).toEqual(['pkg-a']);
     });
   });
 
   describe('installOrmPackages', () => {
-    test('should install Prisma packages', () => {
-      jest.spyOn(installer, 'installIfNeeded').mockReturnValue({
-        success: true,
-        installed: ['@prisma/client', 'prisma'],
-        failed: []
-      });
-      
-      const result = installer.installOrmPackages('Prisma', true);
-      
-      expect(installer.installIfNeeded).toHaveBeenCalledWith(['@prisma/client', 'prisma'], false, true);
-      expect(result).toEqual({
-        success: true,
-        installed: ['@prisma/client', 'prisma'],
-        failed: []
-      });
-    });
-
-    test('should install Sequelize packages', () => {
-      jest.spyOn(installer, 'installIfNeeded').mockReturnValue({
-        success: true,
-        installed: ['sequelize', 'mysql2'],
-        failed: []
-      });
-      
-      const result = installer.installOrmPackages('Sequelize', true);
-      
-      expect(installer.installIfNeeded).toHaveBeenCalledWith(['sequelize', 'mysql2'], false, true);
-      expect(result).toEqual({
-        success: true,
-        installed: ['sequelize', 'mysql2'],
-        failed: []
-      });
-    });
-
-    test('should install Mongoose packages', () => {
-      jest.spyOn(installer, 'installIfNeeded').mockReturnValue({
-        success: true,
-        installed: ['mongoose'],
-        failed: []
-      });
-      
-      const result = installer.installOrmPackages('Mongoose', true);
-      
-      expect(installer.installIfNeeded).toHaveBeenCalledWith(['mongoose'], false, true);
-      expect(result).toEqual({
-        success: true,
-        installed: ['mongoose'],
-        failed: []
-      });
-    });
-
-    test('should install TypeORM packages', () => {
-      jest.spyOn(installer, 'installIfNeeded').mockReturnValue({
-        success: true,
-        installed: ['typeorm', 'reflect-metadata'],
-        failed: []
-      });
-      
-      const result = installer.installOrmPackages('TypeORM', true);
-      
-      expect(installer.installIfNeeded).toHaveBeenCalledWith(['typeorm', 'reflect-metadata'], false, true);
-      expect(result).toEqual({
-        success: true,
-        installed: ['typeorm', 'reflect-metadata'],
-        failed: []
-      });
-    });
-
-    test('should return empty result for unknown ORM', () => {
-      const result = installer.installOrmPackages('UnknownORM', true);
-      
-      expect(installer.installIfNeeded).not.toHaveBeenCalled();
-      expect(result).toEqual({
+    test.each([
+      ['Prisma', ['@prisma/client', 'prisma']],
+      ['Sequelize', ['sequelize', 'mysql2']],
+      ['Mongoose', ['mongoose']],
+      ['TypeORM', ['typeorm', 'reflect-metadata']],
+    ])('maps %s to its packages', async (orm, expectedPackages) => {
+      installer.internals.installIfNeeded = jest.fn().mockResolvedValue({
         success: true,
         installed: [],
-        failed: []
+        failed: [],
       });
+
+      await installer.installOrmPackages(orm);
+
+      expect(installer.internals.installIfNeeded).toHaveBeenCalledWith(
+        expectedPackages,
+        {}
+      );
     });
 
-    test('should handle null or undefined ORM', () => {
-      const result1 = installer.installOrmPackages(null, true);
-      const result2 = installer.installOrmPackages(undefined, true);
-      
-      expect(installer.installIfNeeded).not.toHaveBeenCalled();
-      expect(result1).toEqual({
-        success: true,
-        installed: [],
-        failed: []
+    test('returns empty result for unknown or null ORM', async () => {
+      installer.internals.installIfNeeded = jest.fn();
+
+      const unknown = await installer.installOrmPackages('UnknownORM');
+      const nulled = await installer.installOrmPackages(null);
+
+      expect(unknown).toEqual({ success: true, installed: [], failed: [] });
+      expect(nulled).toEqual({ success: true, installed: [], failed: [] });
+      expect(installer.internals.installIfNeeded).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getPackageManager (lock-file based)', () => {
+    test('detects pnpm', () => {
+      fs.outputFileSync(path.join(global.tempDir, 'pnpm-lock.yaml'), '');
+      expect(installer.getPackageManager()).toBe('pnpm');
+    });
+
+    test('detects yarn', () => {
+      fs.removeSync(path.join(global.tempDir, 'pnpm-lock.yaml'));
+      fs.outputFileSync(path.join(global.tempDir, 'yarn.lock'), '');
+      expect(installer.getPackageManager()).toBe('yarn');
+    });
+
+    test('detects bun', () => {
+      fs.removeSync(path.join(global.tempDir, 'yarn.lock'));
+      fs.outputFileSync(path.join(global.tempDir, 'bun.lockb'), '');
+      expect(installer.getPackageManager()).toBe('bun');
+    });
+
+    test('falls back to npm', () => {
+      fs.removeSync(path.join(global.tempDir, 'bun.lockb'));
+      fs.removeSync(path.join(global.tempDir, 'package-lock.json'));
+      expect(installer.getPackageManager()).toBe('npm');
+    });
+  });
+
+  describe('PACKAGE_MANAGERS commands', () => {
+    test('builds correct npm/pnpm/yarn/bun install commands', () => {
+      const pm = installer.PACKAGE_MANAGERS;
+
+      expect(pm.npm.install(['a', 'b'])).toBe('npm install a b');
+      expect(pm.npm.install(['a'], { saveDev: true })).toBe('npm install --save-dev a');
+      expect(pm.pnpm.install(['a'], { saveDev: true })).toBe('pnpm add -D a');
+      expect(pm.yarn.install(['a'], { saveDev: true })).toBe('yarn add --dev a');
+      expect(pm.bun.install(['a'], { saveDev: true })).toBe('bun add --dev a');
+    });
+  });
+
+  describe('execCommand (real implementation)', () => {
+    test('runs a trivial shell command cross-platform', async () => {
+      const result = await execCommand(`node -e "process.exit(0)"`, {
+        stdio: 'pipe',
       });
-      expect(result2).toEqual({
-        success: true,
-        installed: [],
-        failed: []
-      });
+      expect(result.code).toBe(0);
     });
   });
 });

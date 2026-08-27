@@ -1,6 +1,6 @@
 {
   "name": "rakitin",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "author": "Reinvy",
   "license": "MIT",
   "repository": {
@@ -34,6 +34,10 @@
     "./config": {
       "import": "./dist/esm/config/index.js",
       "require": "./lib/config/index.js"
+    },
+    "./naming": {
+      "import": "./dist/esm/naming.js",
+      "require": "./lib/naming.js"
     },
     "./utils": {
       "import": "./dist/esm/utils/index.js",
@@ -70,7 +74,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "start": "node bin/rakitin.js",
@@ -93,7 +97,15 @@
     "prepublishOnly": "npm run build && npm run typecheck"
   },
   "dependencies": {
+    "@prisma/client": "^7.10.0",
+    "ejs": "^3.1.10",
     "inquirer": "^12.8.2",
+    "mongoose": "^9.9.4",
+    "mysql2": "^3.24.2",
+    "prisma": "^8.0.0-rc.12",
+    "reflect-metadata": "^0.2.2",
+    "sequelize": "^6.37.8",
+    "typeorm": "^1.1.0",
     "yargs": "^17.7.2"
   },
   "devDependencies": {

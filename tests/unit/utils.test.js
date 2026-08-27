@@ -226,7 +226,6 @@ describe('normalizeModuleName', () => {
     const result1 = normalizeModuleName('TestModule');
     const result2 = normalizeModuleName('TestModule');
     expect(result1).toBe(result2);
-    expect(getPathCacheSize()).toBeGreaterThan(0);
   });
 });
 

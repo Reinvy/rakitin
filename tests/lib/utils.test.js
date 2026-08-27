@@ -1,20 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const utils = require('../../lib/utils');
-const { modulesPath, sharedPath, basePath } = require('../../lib/constants');
-
-// Mock the constants to use temp directory
-jest.mock('../../lib/constants', () => {
-  const tempDir = path.join(__dirname, '../temp');
-  return {
-    basePath: path.join(tempDir, 'app'),
-    modulesPath: path.join(tempDir, 'app', 'modules'),
-    sharedPath: path.join(tempDir, 'app', 'shared'),
-    prismaPath: path.join(tempDir, 'prisma', 'models'),
-    typeormEntitiesPath: path.join(tempDir, 'app', 'modules'),
-    mongooseModelsPath: path.join(tempDir, 'app', 'modules')
-  };
-});
+const { getPaths } = require('../../lib/constants');
 
 describe('Utils', () => {
   describe('ensureDir', () => {
@@ -83,7 +70,9 @@ describe('Utils', () => {
   describe('ensureBaseStructure', () => {
     test('should create base directory structure', () => {
       utils.ensureBaseStructure();
-      
+
+      // Read paths lazily AFTER cwd is switched to the temp dir
+      const { basePath, modulesPath, sharedPath } = getPaths();
       expect(fs.existsSync(path.join(basePath, 'app.js'))).toBe(true);
       expect(fs.existsSync(path.join(basePath, 'server.js'))).toBe(true);
       expect(fs.existsSync(modulesPath)).toBe(true);
@@ -100,8 +89,8 @@ describe('Utils', () => {
       expect(utils.toPascalCase('hello world')).toBe('HelloWorld');
       expect(utils.toPascalCase('hello-world')).toBe('HelloWorld');
       expect(utils.toPascalCase('hello_world')).toBe('HelloWorld');
-      expect(utils.toPascalCase('helloWorld')).toBe('Helloworld');
-      expect(utils.toPascalCase('HelloWorld')).toBe('Helloworld');
+      expect(utils.toPascalCase('helloWorld')).toBe('HelloWorld');
+      expect(utils.toPascalCase('HelloWorld')).toBe('HelloWorld');
     });
 
     test('should handle edge cases', () => {
