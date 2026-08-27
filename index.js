@@ -36,11 +36,17 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  if (err?.name === "ExitPromptError" || err?.message?.includes("SIGINT")) {
-    console.log("❌ Proses dibatalkan oleh pengguna.");
-    process.exit(0);
-  }
-  console.error("❌ Terjadi error:", err);
-  process.exit(1);
-});
+module.exports = { main, run: main };
+
+// Auto-run ONLY when executed directly (`node index.js` / bin shim),
+// not when required by tests or library consumers.
+if (require.main === module) {
+  main().catch((err) => {
+    if (err?.name === "ExitPromptError" || err?.message?.includes("SIGINT")) {
+      console.log("❌ Proses dibatalkan oleh pengguna.");
+      process.exit(0);
+    }
+    console.error("❌ Terjadi error:", err);
+    process.exit(1);
+  });
+}

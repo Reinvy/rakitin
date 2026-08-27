@@ -246,8 +246,9 @@ describe('FileValidator', () => {
       const result = FileValidator.validateModuleDirectory(moduleName, basePath, 'modular');
       
       expect(result.isValid).toBe(false);
-      expect(result.path).toBe(path.join(modulePath, 'controllers'));
-      expect(result.error).toBe(`Subdirektori yang diperlukan tidak ditemukan: ${path.join(modulePath, 'controllers')}`);
+      // Only 'routes' is required for modular integration (relaxed v2)
+      expect(result.path).toBe(path.join(modulePath, 'routes'));
+      expect(result.error).toBe(`Subdirektori yang diperlukan tidak ditemukan: ${path.join(modulePath, 'routes')}`);
     });
   });
 

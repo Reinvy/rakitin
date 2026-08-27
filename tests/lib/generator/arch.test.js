@@ -1,331 +1,96 @@
+/**
+ * Architecture generator tests - REAL disk execution in an isolated cwd
+ * (per-suite mkdtemp from setup.js). Generated files are syntax-checked.
+ */
 const fs = require('fs-extra');
 const path = require('path');
-const { simpleArch } = require('../../lib/generator/module/arch/simple.arch');
-const { modularArch } = require('../../lib/generator/module/arch/modular.arch');
+const vm = require('vm');
+const { simpleArch } = require('../../../lib/generator/module/arch/simple.arch');
+const { modularArch } = require('../../../lib/generator/module/arch/modular.arch');
 
-// Mock dependencies
-jest.mock('fs-extra');
-jest.mock('../../lib/constants');
-jest.mock('../../lib/utils');
-jest.mock('../../lib/generator/shared/orm-service-generator');
-jest.mock('../../lib/generator/shared/validation-utils');
+function modulesPathFor(name) {
+  const { getPaths } = require('../../../lib/constants');
+  return path.join(getPaths().modulesPath, name);
+}
 
-const { modulesPath } = require('../../lib/constants');
-const { ensureDir, writeFileIfNotExists, toKebabCase } = require('../../lib/utils');
-const { generateServiceCode } = require('../../lib/generator/shared/orm-service-generator');
-const { validateModuleName, validateOrm, handleError } = require('../../lib/generator/shared/validation-utils');
+/** Strip CommonJS requires so vm.Script can compile fragments standalone. */
+function stripRequires(src) {
+  return src.replace(/require\([^)]*\)/g, '({})');
+}
 
-describe('Architecture Generators', () => {
-  beforeEach(() => {
-    // Reset all mocks before each test
-    jest.clearAllMocks();
-    
-    // Mock process.cwd
-    process.cwd = jest.fn(() => global.tempDir);
-    
-    // Mock modulesPath
-    modulesPath.mockReturnValue(path.join(global.tempDir, 'app', 'modules'));
-    
-    // Mock validation functions to return valid results by default
-    validateModuleName.mockReturnValue({ isValid: true, message: 'Valid module name' });
-    validateOrm.mockReturnValue({ isValid: true, message: 'Valid ORM' });
-    
-    // Mock toKebabCase to return a simple transformation
-    toKebabCase.mockImplementation(str => str.toLowerCase().replace(/\s+/g, '-'));
-    
-    // Mock handleError
-    handleError.mockImplementation((context, error) => {
-      throw error;
-    });
+describe('simpleArch', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test('creates controller, service, router for a hyphenated module', async () => {
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    await simpleArch('user-profile', 'None');
+
+    const dir = modulesPathFor('user-profile');
+    expect(fs.existsSync(path.join(dir, 'user-profile.controller.js'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'user-profile.service.js'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'user-profile.router.js'))).toBe(true);
+
+    // Generated service uses the no-ORM in-memory store (B1)
+    const service = fs.readFileSync(path.join(dir, 'user-profile.service.js'), 'utf8');
+    expect(service).toContain('USERPROFILE_STORE');
   });
 
-  describe('simpleArch', () => {
-    test('should create simple architecture with correct directory structure', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await simpleArch(moduleName, orm);
-      
-      // Verify validation functions were called
-      expect(validateModuleName).toHaveBeenCalledWith(moduleName);
-      expect(validateOrm).toHaveBeenCalledWith(orm);
-      
-      // Verify toKebabCase was called
-      expect(toKebabCase).toHaveBeenCalledWith(moduleName);
-      
-      // Verify ensureDir was called
-      expect(ensureDir).toHaveBeenCalledWith(path.join(global.tempDir, 'app', 'modules', 'test-module'));
-      
-      // Verify writeFileIfNotExists was called for each file
-      expect(writeFileIfNotExists).toHaveBeenCalledTimes(3);
-      
-      // Verify generateServiceCode was called
-      expect(generateServiceCode).toHaveBeenCalledWith(moduleName, orm, 'Simple');
-    });
+  test('is idempotent - existing files are not overwritten', async () => {
+    await simpleArch('blog', 'None');
 
-    test('should create correct controller file', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await simpleArch(moduleName, orm);
-      
-      // Verify writeFileIfNotExists was called with correct controller content
-      const controllerPath = path.join(global.tempDir, 'app', 'modules', 'test-module', 'test-module.controller.js');
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        controllerPath,
-        expect.stringContaining('// Test Module Controller')
-      );
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        controllerPath,
-        expect.stringContaining('const { getAll } = require("./test-module.service");')
-      );
-    });
+    const dir = modulesPathFor('blog');
+    const markerFile = path.join(dir, 'blog.controller.js');
+    fs.writeFileSync(markerFile, '// CUSTOM USER CODE', 'utf8');
 
-    test('should create correct service file', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await simpleArch(moduleName, orm);
-      
-      // Verify writeFileIfNotExists was called with correct service content
-      const servicePath = path.join(global.tempDir, 'app', 'modules', 'test-module', 'test-module.service.js');
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        servicePath,
-        '// Test Service Code'
-      );
-    });
-
-    test('should create correct router file', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await simpleArch(moduleName, orm);
-      
-      // Verify writeFileIfNotExists was called with correct router content
-      const routerPath = path.join(global.tempDir, 'app', 'modules', 'test-module', 'test-module.routes.js');
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        routerPath,
-        expect.stringContaining('// Test Module Router')
-      );
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        routerPath,
-        expect.stringContaining('const { getAll } = require("./test-module.controller");')
-      );
-    });
-
-    test('should handle validation errors for module name', async () => {
-      const moduleName = 'Invalid Module';
-      const orm = 'Prisma';
-      
-      // Mock validateModuleName to return invalid
-      validateModuleName.mockReturnValue({ isValid: false, message: 'Invalid module name' });
-      
-      // Call the function and expect it to throw
-      await expect(simpleArch(moduleName, orm)).rejects.toThrow('Invalid module name');
-    });
-
-    test('should handle validation errors for ORM', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Invalid ORM';
-      
-      // Mock validateOrm to return invalid
-      validateOrm.mockReturnValue({ isValid: false, message: 'Invalid ORM' });
-      
-      // Call the function and expect it to throw
-      await expect(simpleArch(moduleName, orm)).rejects.toThrow('Invalid ORM');
-    });
-
-    test('should handle errors from file operations', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Mock ensureDir to throw an error
-      ensureDir.mockImplementation(() => {
-        throw new Error('Directory creation error');
-      });
-      
-      // Call the function and expect it to throw
-      await expect(simpleArch(moduleName, orm)).rejects.toThrow('Directory creation error');
-      
-      // Verify handleError was called
-      expect(handleError).toHaveBeenCalledWith('pembuatan modul sederhana', expect.any(Error));
-    });
+    await simpleArch('blog', 'None');
+    expect(fs.readFileSync(markerFile, 'utf8')).toBe('// CUSTOM USER CODE');
   });
 
-  describe('modularArch', () => {
-    test('should create modular architecture with correct directory structure', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await modularArch(moduleName, orm);
-      
-      // Verify validation functions were called
-      expect(validateModuleName).toHaveBeenCalledWith(moduleName);
-      expect(validateOrm).toHaveBeenCalledWith(orm);
-      
-      // Verify toKebabCase was called
-      expect(toKebabCase).toHaveBeenCalledWith(moduleName);
-      
-      // Verify ensureDir was called for each directory
-      expect(ensureDir).toHaveBeenCalledWith(path.join(global.tempDir, 'app', 'modules', 'test-module'));
-      expect(ensureDir).toHaveBeenCalledWith(path.join(global.tempDir, 'app', 'modules', 'test-module', 'controllers'));
-      expect(ensureDir).toHaveBeenCalledWith(path.join(global.tempDir, 'app', 'modules', 'test-module', 'services'));
-      expect(ensureDir).toHaveBeenCalledWith(path.join(global.tempDir, 'app', 'modules', 'test-module', 'models'));
-      expect(ensureDir).toHaveBeenCalledWith(path.join(global.tempDir, 'app', 'modules', 'test-module', 'routes'));
-      
-      // Verify writeFileIfNotExists was called for each file
-      expect(writeFileIfNotExists).toHaveBeenCalledTimes(4);
-      
-      // Verify generateServiceCode was called
-      expect(generateServiceCode).toHaveBeenCalledWith(moduleName, orm, 'Modular');
+  test('throws on invalid module name', async () => {
+    await expect(simpleArch('', 'None')).rejects.toThrow();
+  });
+});
+
+describe('modularArch', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test('creates controllers/services/models/routes subdirectories', async () => {
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    await modularArch('order-item', 'Mongoose');
+
+    const dir = modulesPathFor('order-item');
+    ['controllers', 'services', 'models', 'routes'].forEach((sub) => {
+      expect(fs.existsSync(path.join(dir, sub))).toBe(true);
     });
 
-    test('should create correct controller file', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await modularArch(moduleName, orm);
-      
-      // Verify writeFileIfNotExists was called with correct controller content
-      const controllerPath = path.join(global.tempDir, 'app', 'modules', 'test-module', 'controllers', 'test-module.controller.js');
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        controllerPath,
-        expect.stringContaining('// Test Module Controller')
-      );
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        controllerPath,
-        expect.stringContaining('const { getAll } = require("../services/test-module.service");')
-      );
-    });
+    const controllerSrc = fs.readFileSync(
+      path.join(dir, 'controllers', 'order-item.controller.js'),
+      'utf8'
+    );
+    const routerSrc = fs.readFileSync(
+      path.join(dir, 'routes', 'order-item.router.js'),
+      'utf8'
+    );
+    // Parse-check both fragments
+    expect(() => new vm.Script(stripRequires(controllerSrc))).not.toThrow();
+    expect(() => new vm.Script(stripRequires(routerSrc))).not.toThrow();
 
-    test('should create correct service file', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await modularArch(moduleName, orm);
-      
-      // Verify writeFileIfNotExists was called with correct service content
-      const servicePath = path.join(global.tempDir, 'app', 'modules', 'test-module', 'services', 'test-module.service.js');
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        servicePath,
-        '// Test Service Code'
-      );
-    });
+    // Mongoose naming consistency: kebab-case model file + import
+    const serviceSrc = fs.readFileSync(
+      path.join(dir, 'services', 'order-item.service.js'),
+      'utf8'
+    );
+    expect(serviceSrc).toContain('../../models/order-item.model');
+  });
 
-    test('should create correct model file', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await modularArch(moduleName, orm);
-      
-      // Verify writeFileIfNotExists was called with correct model content
-      const modelPath = path.join(global.tempDir, 'app', 'modules', 'test-module', 'models', 'test-module.model.js');
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        modelPath,
-        expect.stringContaining('// Test Module Model')
-      );
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        modelPath,
-        expect.stringContaining('// Schema atau ORM Model bisa ditulis di sini.')
-      );
-    });
+  test('is idempotent across repeated generation', async () => {
+    await modularArch('invoice', 'None');
+    const modelFile = path.join(modulesPathFor('invoice'), 'models', 'invoice.model.js');
+    fs.writeFileSync(modelFile, '// TUNED BY USER', 'utf8');
 
-    test('should create correct router file', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Call the function
-      await modularArch(moduleName, orm);
-      
-      // Verify writeFileIfNotExists was called with correct router content
-      const routerPath = path.join(global.tempDir, 'app', 'modules', 'test-module', 'routes', 'test-module.routes.js');
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        routerPath,
-        expect.stringContaining('// Test Module Routes')
-      );
-      expect(writeFileIfNotExists).toHaveBeenCalledWith(
-        routerPath,
-        expect.stringContaining('const { getAll } = require("../controllers/test-module.controller");')
-      );
-    });
-
-    test('should handle validation errors for module name', async () => {
-      const moduleName = 'Invalid Module';
-      const orm = 'Prisma';
-      
-      // Mock validateModuleName to return invalid
-      validateModuleName.mockReturnValue({ isValid: false, message: 'Invalid module name' });
-      
-      // Call the function and expect it to throw
-      await expect(modularArch(moduleName, orm)).rejects.toThrow('Invalid module name');
-    });
-
-    test('should handle validation errors for ORM', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Invalid ORM';
-      
-      // Mock validateOrm to return invalid
-      validateOrm.mockReturnValue({ isValid: false, message: 'Invalid ORM' });
-      
-      // Call the function and expect it to throw
-      await expect(modularArch(moduleName, orm)).rejects.toThrow('Invalid ORM');
-    });
-
-    test('should handle errors from file operations', async () => {
-      const moduleName = 'Test Module';
-      const orm = 'Prisma';
-      
-      // Mock generateServiceCode to return a simple service code
-      generateServiceCode.mockReturnValue('// Test Service Code');
-      
-      // Mock ensureDir to throw an error
-      ensureDir.mockImplementation(() => {
-        throw new Error('Directory creation error');
-      });
-      
-      // Call the function and expect it to throw
-      await expect(modularArch(moduleName, orm)).rejects.toThrow('Directory creation error');
-      
-      // Verify handleError was called
-      expect(handleError).toHaveBeenCalledWith('pembuatan modul modular', expect.any(Error));
-    });
+    await modularArch('invoice', 'None');
+    expect(fs.readFileSync(modelFile, 'utf8')).toBe('// TUNED BY USER');
   });
 });

@@ -23,7 +23,11 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
   verbose: true,
   forceExit: true,
+  // clearMocks only clears CALL HISTORY between tests; it does NOT wipe
+  // mock IMPLEMENTATIONS. resetMocks:false is deliberate - resetting
+  // implementations globally made factory-defined behavior vanish mid-suite
+  // and produced order-dependent failures. Suites restore what they need.
   clearMocks: true,
-  resetMocks: true,
-  restoreMocks: true
+  resetMocks: false,
+  restoreMocks: false,
 };

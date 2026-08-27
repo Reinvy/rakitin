@@ -94,7 +94,8 @@
     "build:cjs": "node build.config.js --cjs",
     "build:esm": "node build.config.js --esm",
     "build:clean": "node build.config.js --clean",
-    "prepublishOnly": "npm run build && npm run typecheck"
+    "prepublishOnly": "npm run build && npm run typecheck",
+    "postinstall": "prisma skills sync || exit 0"
   },
   "dependencies": {
     "@prisma/client": "^7.10.0",
