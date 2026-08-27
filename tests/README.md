@@ -67,6 +67,18 @@ Pengujian untuk memastikan komponen bekerja sama dengan baik:
 - **File Validation**: Pengujian validitas file yang dihasilkan oleh generator.
 - **Directory Structure**: Pengujian struktur direktori yang dibuat oleh generator.
 
+### 4. Pengujian Real Project (Real Project E2E Tests)
+Pengujian langsung terhadap direktori proyek nyata di `tests/project/` tanpa mocking:
+```bash
+# Update link global rakitin terlebih dahulu
+npm unlink -g rakitin 2>/dev/null || true
+npm link
+
+# Jalankan suite pengujian real project
+npm run test:real-project
+```
+Aturan lengkap dapat dilihat di [docs/real-project-testing-rules.md](../docs/real-project-testing-rules.md).
+
 ## Mocking
 
 Pengujian menggunakan mocking untuk mengisolasi komponen yang sedang diuji:

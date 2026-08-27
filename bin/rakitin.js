@@ -260,7 +260,7 @@ async function runAdd(argv) {
     if (argv.thing === "util") {
       const utilModule = require("../lib/generator/util/util");
       const generateUtil = utilModule.generateUtil || utilModule;
-      result = (await generateUtil()) || {};
+      result = (await generateUtil(argv.name)) || {};
     } else if (argv.thing === "recipe") {
       // Convenience alias: rakitin add recipe <name>
       const { recipeCommand } = require("../lib/commands/recipe");
