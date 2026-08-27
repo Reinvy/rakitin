@@ -97,15 +97,11 @@
     "build:clean": "node build.config.js --clean",
     "prepublishOnly": "npm run build && npm run typecheck",
     "format": "prettier --write \"lib/**/*.js\" \"bin/*.js\" \"tests/**/*.js\" \"index.js\"",
-    "format:check": "prettier --check \"lib/**/*.js\" \"bin/*.js\"",
-    "postinstall": "prisma skills sync || exit 0"
+    "format:check": "prettier --check \"lib/**/*.js\" \"bin/*.js\""
   },
   "dependencies": {
-    "@prisma/client": "^7.10.0",
     "ejs": "^3.1.10",
     "inquirer": "^12.8.2",
-    "mongoose": "^9.9.4",
-    "prisma": "^8.0.0-rc.12",
     "yargs": "^17.7.2"
   },
   "devDependencies": {
