@@ -1,0 +1,10 @@
+{
+  "name": "rakitin-example-intermediate",
+  "private": true,
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "prisma": {
+    "schema": "./prisma/schema.prisma"
+  }
+}

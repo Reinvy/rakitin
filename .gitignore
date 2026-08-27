@@ -42,4 +42,9 @@ app
 prisma
 /lib/generated/prisma
 
-/lib/generated/prisma
+# Local agent tooling scratch files (not part of the product)
+prisma.config.ts
+.agents/
+.claude/
+.cursor/
+.devin/

@@ -1,383 +1,257 @@
-# 🔄 Integrasi Router Utama di rakitin
+# Router Integration
 
-## 🇮🇩 Bahasa Indonesia
+Both integration flows shipped by rakitin v2 produce the same artifact — a
+marker-managed `app/routes/index.js` — through different ergonomics:
 
-### Pendahuluan
+| Flow | Entry point | Mode |
+| --- | --- | --- |
+| New headless integration | `rakitin integrate` (`lib/commands/integrate.js`) | non-interactive, script-friendly |
+| Legacy interactive flow | `rakitin router` or bare menu → “Router Integration” (`lib/generator/router/router.js#integrateRouter`) | inquirer-driven |
 
-Fitur **Integrasi Router Utama** di **rakitin CLI** mempermudah proses integrasi router dari modul-modul yang telah dibuat ke dalam router utama aplikasi. Fitur ini mengotomatisasi proses yang biasanya dilakukan secara manual, sehingga menghemat waktu dan mengurangi kemungkinan kesalahan.
-
-### Fitur Utama
-
-- **Integrasi Otomatis**: Mendeteksi semua modul yang ada dan mengintegrasikannya secara otomatis
-- **Integrasi Manual**: Memilih modul-modul tertentu yang akan diintegrasikan
-- **Dukungan Arsitektur**:
-  - **Modular**: Setiap modul memiliki router terpisah yang diimpor ke router utama
-  - **Simple**: Semua route didefinisikan langsung di router utama dengan mengimpor controller
-- **Pilihan Lokasi Router**: Router utama dapat dibuat di folder `app/routes` atau di folder root proyek
-- **Middleware Global**: Mendukung penggunaan middleware global yang diterapkan ke semua route
-- **Contoh Penggunaan**: Otomatis membuat contoh penggunaan router di file `app.js`
-
-### Cara Penggunaan
-
-#### 1. Menjalankan Integrasi Router
-
-Jalankan CLI rakitin:
-
-```bash
-rakitin
-```
-
-Pilih **"Integrasi Router Utama"** dari menu:
-
-```
-🚀 Hai Sayang! Ini CLI rakitin-mu!
-? Apa yang ingin Anda generate? (Use arrow keys)
-❯ Module
-  Middleware
-  Util
-  Config
-  Integrasi Router Utama
-```
-
-#### 2. Memilih Jenis Integrasi
-
- Anda akan diminta memilih jenis integrasi:
-
-```
-? Pilih jenis integrasi router:
-❯ Otomatis (deteksi semua modul)
-  Manual (pilih modul yang diinginkan)
-```
-
-- **Otomatis**: Akan mendeteksi dan mengintegrasikan semua modul yang ada di folder `app/modules`
-- **Manual**: Memungkinkan Anda memilih modul-modul tertentu yang akan diintegrasikan
-
-#### 3. Memilih Lokasi Router
-
-```
-? Di mana router utama akan dibuat?
-❯ Di folder app/routes
-  Di folder root
-```
-
-- **Di folder app/routes**: Router utama akan dibuat di `{basePath}/routes/index.js`
-- **Di folder root**: Router utama akan dibuat di `{cwd}/routes/index.js`
-
-#### 4. Memilih Arsitektur Router
-
-```
-? Pilih arsitektur router:
-❯ Modular (setiap modul memiliki router terpisah)
-  Simple (semua route dalam satu file)
-```
-
-- **Modular**: Setiap modul harus memiliki file router terpisah yang akan diimpor ke router utama
-- **Simple**: Router utama akan mendefinisikan semua route dengan mengimpor controller dari setiap modul
-
-#### 5. Memilih Middleware Global (Opsional)
-
-```
-? Apakah Anda ingin menggunakan middleware global? Yes
-? Pilih middleware global yang ingin digunakan:
-❯ ◉ Authentication
-  ◉ Authorization
-  ◉ Logging
-  ◯ Rate Limiting
-  ◯ CORS
-  ◯ Body Parser
-```
-
-Middleware yang dipilih akan diimpor dan diterapkan ke semua route di router utama.
-
-### Struktur File yang Dihasilkan
-
-#### Arsitektur Modular
-
-Untuk arsitektur modular, router utama akan memiliki struktur seperti ini:
-
-```javascript
-const express = require('express');
-const router = express.Router();
-
-// Global Middleware
-const authMiddleware = require('../middleware/auth.middleware');
-const loggingMiddleware = require('../middleware/logging.middleware');
-
-// Import modular routers
-const userRouter = require('../modules/user/routes/user.router.js');
-const productRouter = require('../modules/product/routes/product.router.js');
-
-// Apply global middleware
-router.use(authMiddleware);
-router.use(loggingMiddleware);
-
-// Use modular routers
-router.use('/user', userRouter);
-router.use('/product', productRouter);
-
-module.exports = router;
-```
-
-#### Arsitektur Simple
-
-Untuk arsitektur simple, router utama akan memiliki struktur seperti ini:
-
-```javascript
-const express = require('express');
-const router = express.Router();
-
-// Global Middleware
-const authMiddleware = require('../middleware/auth.middleware');
-const loggingMiddleware = require('../middleware/logging.middleware');
-
-// Routes for user
-const userController = require('../modules/user/user.controller.js');
-
-// Routes for product
-const productController = require('../modules/product/product.controller.js');
-
-// Apply global middleware
-router.use(authMiddleware);
-router.use(loggingMiddleware);
-
-// User routes
-router.get('/user', userController.getAll);
-router.get('/user/:id', userController.getById);
-router.post('/user', userController.create);
-router.put('/user/:id', userController.update);
-router.delete('/user/:id', userController.delete);
-
-// Product routes
-router.get('/product', productController.getAll);
-router.get('/product/:id', productController.getById);
-router.post('/product', productController.create);
-router.put('/product/:id', productController.update);
-router.delete('/product/:id', productController.delete);
-
-module.exports = router;
-```
-
-### Contoh Penggunaan di app.js
-
-Jika Anda memilih untuk membuat contoh penggunaan, file `app.js` akan diperbarui seperti ini:
-
-```javascript
-const express = require('express');
-const app = express();
-
-// Middleware
-app.use(express.json());
-
-// Contoh penggunaan router
-const routes = require('./routes');
-app.use('/api', routes);
-
-module.exports = app;
-```
-
-### Validasi dan Error Handling
-
-Fitur ini memiliki sistem validasi yang kuat untuk memastikan bahwa semua file yang diperlukan ada sebelum melakukan integrasi:
-
-1. **Validasi File Router/Controller**: Memastikan file router atau controller yang akan diimpor ada
-2. **Validasi Struktur Modul**: Memastikan modul memiliki struktur yang sesuai dengan arsitektur yang dipilih
-3. **Error Handling**: Menampilkan pesan error yang jelas jika terjadi masalah selama integrasi
-
-### Best Practices
-
-1. **Konsistensi Arsitektur**: Pastikan semua modul menggunakan arsitektur yang sama (modular atau simple)
-2. **Penamaan File**: Gunakan konvensi penamaan yang konsisten untuk file router dan controller
-3. **Middleware Global**: Pilih middleware yang benar-benar diperlukan untuk semua route
-4. **Struktur Folder**: Pertahankan struktur folder yang konsisten untuk semua modul
+All router edits funnel through the universal safety layer
+(`lib/safety.js`): write-if-absent creation, `.bak` backups on replace, and
+idempotent marker injection. Nothing ever blind-overwrites your router.
 
 ---
 
-## 🇬🇧 English
+## 1. Marker mechanics
 
-### Introduction
+Exact tokens exported from `lib/safety.js`:
 
-The **Main Router Integration** feature in **rakitin CLI** simplifies the process of integrating routers from modules that have been created into the application's main router. This feature automates a process that is usually done manually, saving time and reducing the possibility of errors.
+```
+/* rakitin:routes:start */
+/* rakitin:routes:end */
+```
 
-### Key Features
+`buildRoutesContent(existing, routeLines)` decides what happens given the
+current state of `app/routes/index.js`:
 
-- **Automatic Integration**: Detects all existing modules and integrates them automatically
-- **Manual Integration**: Allows selecting specific modules to be integrated
-- **Architecture Support**:
-  - **Modular**: Each module has a separate router that is imported into the main router
-  - **Simple**: All routes are defined directly in the main router by importing controllers
-- **Router Location Options**: The main router can be created in the `app/routes` folder or in the project root folder
-- **Global Middleware**: Supports the use of global middleware applied to all routes
-- **Usage Example**: Automatically creates an example of router usage in the `app.js` file
+| Existing file | Action | Behavior |
+| --- | --- | --- |
+| absent | `create` | express header + marked block + `module.exports = router;` |
+| has both markers | `inject` | everything outside `[start…end]` preserved **byte-for-byte**, marked region replaced |
+| no markers, ends with `module.exports` | `inject` | full marked block inserted **before** the last `module.exports`; user code above untouched |
+| no markers, no anchor | `append` | trimmed existing content + trailing marked block |
 
-### How to Use
+A fresh router therefore looks like:
 
-#### 1. Running Router Integration
+```js
+const express = require('express');
+const router = express.Router();
 
-Run the rakitin CLI:
+/* rakitin:routes:start */
+// Routes managed by rakitin - safe to regenerate; keep custom
+// routes OUTSIDE these markers to preserve them.
+// …wiring…
+
+/* rakitin:routes:end */
+
+module.exports = router;
+```
+
+The two explanatory comment lines belong to `create`/`append` output.
+When a later run takes the `inject` replacement path, the region between
+the tokens is rewritten *without* those comments — so the very first
+regeneration normalizes to the canonical bare-token form (see §5).
+
+Custom routes placed outside the markers survive every regeneration,
+regardless of architecture choice.
+
+## 2. Global middlewares in the generated router
+
+Only four kinds can be selected because only these four actually have a
+generator backing them:
+
+* Authentication (JWT) — `auth`
+* Request Logging — `logger`
+* Global Error Handler — `error`
+* Request Time — `request-time`
+
+(This deliberately replaced an older six-option list that advertised
+`cors`, `rateLimit`, and `bodyParser` entries nothing ever generated.)
+
+Naming rules when wiring a middleware `m`:
+
+* file name — `normalizeModuleName(m)` ⇒ kebab-case:
+  `app/shared/middlewares/<kebab>.middleware.js` (e.g.
+  `request-time` → `request-time.middleware.js`, `My Cool MW` →
+  `my-cool-mw.middleware.js`);
+* identifier — `toIdentifier("<m>-middleware")` ⇒ safe camelCase JS
+  variable (`requestTimeMiddleware`);
+* emitted pair —
+
+```js
+const authMiddleware = require('../shared/middlewares/auth.middleware');
+router.use(authMiddleware);
+```
+
+The headless `integrate` adds one safety rule: a middleware is wired only
+if its file already exists on disk, checked once up front — dangling
+requires are structurally impossible.
+
+## 3. Flow A — `rakitin integrate` (new, headless)
+
+### 3.1 Automatic module discovery rules
+
+Discovery is driven by the project detector over `app/modules/*`:
+
+1. Every directory under `app/modules` that does not start with `.` is a
+   candidate.
+2. Architecture is judged **per module, independently**:
+   * `modular` ⇔ `app/modules/<dir>/routes/<kebab>.router.js` exists;
+   * `simple` ⇔ `app/modules/<dir>/<kebab>.controller.js` exists;
+   * neither ⇒ the directory is excluded silently.
+3. Mixed layouts are therefore supported natively: modular modules mount
+   sub-routers while simple modules get direct handler bindings in the
+   same generated block.
+
+Per-module emitted lines:
+
+```js
+// modular
+const userProfileRouter = require('../modules/user-profile/routes/user-profile.router');
+router.use('/user-profile', userProfileRouter);
+
+// simple
+const paymentController = require('../modules/payment/payment.controller');
+router.get('/payment', paymentController.getAll);
+router.post('/payment', paymentController.create);
+```
+
+(`require` paths are extension-less; simple wiring binds exactly
+`getAll` + `create`.)
+
+### 3.2 Runtime behavior summary
+
+* No intermediate exists? `writeFileIfNotExistsSafe` creates
+  `app/routes/index.js` plus parent directories.
+* Result `action` ∈ `created | markers-regenerated | block-injected |
+  appended` (command-layer names mapping §1 actions; `markers-regenerated`
+  covers any marker replacement).
+* `--dry-run` prints the plan `{op, path}` pairs instead of writing.
+* Zero valid modules ⇒ exit `0` with guidance
+  (“Tidak ada modul valid untuk diintegrasikan…”), not an error — assert
+  via `--json` payloads when your CI needs strictness.
+* Success contract: `ok:true`, `wired[]` (kebab names),
+  `middlewareApplied[]`, and the mounting hint
+  `app.use('/api', require('./app/routes'))`.
+
+### 3.3 Mounting cheat-sheet
+
+Whatever the flow, finishing touches are identical:
+
+```js
+// app.js / server.js — your code, one line
+app.use('/api', require('./app/routes'));
+```
+
+Post-run verification loop an agent can run unattended:
 
 ```bash
-rakitin
+rakitin integrate --json | jq '{action, wired, middlewareApplied}'
+node -e "require('./app/routes')"   # router module must load cleanly
+jq '.mainRouter' < <(rakitin info)  # markerManaged: true afterwards
 ```
 
-Select **"Integrasi Router Utama"** from the menu:
+If the last probe still reports `markerManaged: false`, a previous
+`.bak` round left stale content or the markers were edited away; compare
+against `app/routes/index.js.bak` before re-running.
 
-```
-🚀 Hai Sayang! Ini CLI rakitin-mu!
-? Apa yang ingin Anda generate? (Use arrow keys)
-❯ Module
-  Middleware
-  Util
-  Config
-  Integrasi Router Utama
-```
+## 4. Flow B — `rakitin router` (legacy, interactive)
 
-#### 2. Choosing Integration Type
+Prompt order (all steps remain valid today):
 
-You will be asked to choose the integration type:
+1. `integrationType` — automatic detection of all modules, or manual
+   checkbox selection (`selectedModules`). Empty candidates abort early
+   with a warning.
+2. Target path fixed to `app/routes/index.js`; the directory is ensured
+   (`ensureDir`) even if missing.
+3. `architecture` — one global choice: Modular (each module owns a router)
+   or Simple (everything flat).
+4. Pre-validation: `FileValidator.validateRouterIntegration` checks each
+   selected module against the **single chosen architecture** and the
+   whole integration aborts on failure (“Validasi gagal.”). This strictness
+   is the key behavioral difference versus the modern flow (§6).
+5. `useGlobalMiddleware` confirm → `selectedMiddlewares` checkbox of the
+   four real options above.
+6. Composition: imports for every valid module (individually re-validated;
+   an invalid one prints an error line and is skipped rather than crashing),
+   then `router.use(...)` bindings for modular wiring or five verbs
+   (`get/getById/post/put/delete`) for simple wiring.
 
-```
-? Pilih jenis integrasi router:
-❯ Otomatis (deteksi semua modul)
-  Manual (pilih modul yang diinginkan)
-```
+   Note: legacy simple wiring binds all five handlers, whereas the new
+   headless flow intentionally binds only `getAll`+`create`; import paths
+   here include the `.js` suffix (via `PathResolver`), which the headless
+   variant omits.
+7. Write through the same safety layer (`created` message otherwise), then:
+8. `createAppExample` — offers usage scaffolding for root `app.js`:
+   * file missing ⇒ writes a minimal Express bootstrap that mounts
+     `./app/routes` under `/api`;
+   * file exists ⇒ `overwriteApp` confirm defaults to **No**, and a Yes
+     merely *appends* the mount snippet (never replacing anything).
 
-- **Otomatis** (Automatic): Will detect and integrate all modules in the `app/modules` folder
-- **Manual** (Manual): Allows you to select specific modules to be integrated
+## 5. Idempotency proof
 
-#### 3. Choosing Router Location
+Marker replacement guarantees convergence. First run creates/integrates;
 
-```
-? Di mana router utama akan dibuat?
-❯ Di folder app/routes
-  Di folder root
-```
+```bash
+$ rakitin integrate --json | jq '.action'
+"created"
 
-- **Di folder app/routes**: The main router will be created at `{basePath}/routes/index.js`
-- **Di folder root**: The main router will be created at `{cwd}/routes/index.js`
-
-#### 4. Choosing Router Architecture
-
-```
-? Pilih arsitektur router:
-❯ Modular (setiap modul memiliki router terpisah)
-  Simple (semua route dalam satu file)
-```
-
-- **Modular**: Each module must have a separate router file that will be imported into the main router
-- **Simple**: The main router will define all routes by importing controllers from each module
-
-#### 5. Choosing Global Middleware (Optional)
-
-```
-? Apakah Anda ingin menggunakan middleware global? Yes
-? Pilih middleware global yang ingin digunakan:
-❯ ◉ Authentication
-  ◉ Authorization
-  ◉ Logging
-  ◯ Rate Limiting
-  ◯ CORS
-  ◯ Body Parser
+$ cp app/routes/index.js /tmp/gen-1
+$ rakitin integrate --json | jq '.action'
+"markers-regenerated"
 ```
 
-Selected middleware will be imported and applied to all routes in the main router.
+The second generation rewrites the block in canonical form (dropping the
+creation-time comment header inside the block); from this point on the
+file is stable:
 
-### Generated File Structure
+```bash
+$ cp app/routes/index.js /tmp/gen-2
+$ rakitin integrate --json >/dev/null
+$ diff /tmp/gen-2 app/routes/index.js && echo IDENTICAL
+IDENTICAL
 
-#### Modular Architecture
-
-For modular architecture, the main router will have a structure like this:
-
-```javascript
-const express = require('express');
-const router = express.Router();
-
-// Global Middleware
-const authMiddleware = require('../middleware/auth.middleware');
-const loggingMiddleware = require('../middleware/logging.middleware');
-
-// Import modular routers
-const userRouter = require('../modules/user/routes/user.router.js');
-const productRouter = require('../modules/product/routes/product.router.js');
-
-// Apply global middleware
-router.use(authMiddleware);
-router.use(loggingMiddleware);
-
-// Use modular routers
-router.use('/user', userRouter);
-router.use('/product', productRouter);
-
-module.exports = router;
+$ sha256sum /tmp/gen-{2,3}.*  # (after another capture+run)
+<same digest>                 # byte-equal digests
 ```
 
-#### Simple Architecture
+So: **two consecutive runs produce identical bytes** as long as the module
+inventory did not change; adding a module only diffs the wiring lines added
+inside the markers. Each replacement leaves its predecessor behind as
+`app/routes/index.js.bak`.
 
-For simple architecture, the main router will have a structure like this:
+## 6. Failure handling philosophy
 
-```javascript
-const express = require('express');
-const router = express.Router();
+| Situation | Modern `integrate` | Legacy `router` flow |
+| --- | --- | --- |
+| Module dir lacks recognized structure | skipped silently during discovery (not listed as valid) | strict validator error listing the missing artifact; whole run aborted |
+| Controller import broken mid-composition | cannot happen (structure pre-checked by detector) | module skipped with error print, rest proceeds |
+| Missing `app/routes/` directory | created recursively via write helper | explicitly ensured upfront |
+| Unsupported edge during write | thrown errors reach `fail()` ⇒ exit 1 | `ErrorHandler` logs and the flow returns quietly |
 
-// Global Middleware
-const authMiddleware = require('../middleware/auth.middleware');
-const loggingMiddleware = require('../middleware/logging.middleware');
+The removal of strict *pre*-validation in the automatic path is deliberate
+(documented inline in `integrateAutoRouter`): since each module’s
+architecture is detected independently and invalid ones degrade to
+warnings/`try/catch` skips, a single malformed directory must not prevent
+every healthy module from being wired. Invalid directories never end up
+generating a dangling require.
 
-// Routes for user
-const userController = require('../modules/user/user.controller.js');
+## 7. Old vs new differences table
 
-// Routes for product
-const productController = require('../modules/product/product.controller.js');
+| Aspect | Legacy `router` (interactive) | New `integrate` (headless) |
+| --- | --- | --- |
+| Module selection | manual checkbox or detect-all prompt | always detect-all |
+| Layout decision | single global architecture forced onto all modules | per-module independent detection (mixed OK) |
+| Simple-module wiring | all five REST verbs | `getAll` + `create` only |
+| Require paths | with `.js` suffix (`PathResolver`) | extension-less |
+| Middleware choice | 4 real options via checkbox | any comma list via `--middleware`, existence-checked |
+| Phantom middlewares (`cors`, `rateLimit`, `bodyParser`) | removed from menu | never accepted |
+| Validation | strict pre-validation, aborts on mismatch | relaxed: skip/warn instead of abort |
+| app.js helper question | confirm flow, may create/patch root `app.js` | none (next-step hint only) |
+| Scriptability | TTY only | `--json`, `--dry-run`, CI-safe exit codes |
+| Safety | markers + `.bak` | identical markers + `.bak` semantics |
 
-// Apply global middleware
-router.use(authMiddleware);
-router.use(loggingMiddleware);
-
-// User routes
-router.get('/user', userController.getAll);
-router.get('/user/:id', userController.getById);
-router.post('/user', userController.create);
-router.put('/user/:id', userController.update);
-router.delete('/user/:id', userController.delete);
-
-// Product routes
-router.get('/product', productController.getAll);
-router.get('/product/:id', productController.getById);
-router.post('/product', productController.create);
-router.put('/product/:id', productController.update);
-router.delete('/product/:id', productController.delete);
-
-module.exports = router;
-```
-
-### Usage Example in app.js
-
-If you choose to create a usage example, the `app.js` file will be updated like this:
-
-```javascript
-const express = require('express');
-const app = express();
-
-// Middleware
-app.use(express.json());
-
-// Contoh penggunaan router
-const routes = require('./routes');
-app.use('/api', routes);
-
-module.exports = app;
-```
-
-### Validation and Error Handling
-
-This feature has a strong validation system to ensure that all required files exist before performing integration:
-
-1. **Router/Controller File Validation**: Ensures that the router or controller files to be imported exist
-2. **Module Structure Validation**: Ensures modules have the appropriate structure for the selected architecture
-3. **Error Handling**: Displays clear error messages if problems occur during integration
-
-### Best Practices
-
-1. **Architecture Consistency**: Ensure all modules use the same architecture (modular or simple)
-2. **File Naming**: Use consistent naming conventions for router and controller files
-3. **Global Middleware**: Choose middleware that is truly necessary for all routes
-4. **Folder Structure**: Maintain a consistent folder structure for all modules
+Both flows converge on the same managed artifact; scripts should prefer
+Flow A, interactive sessions may keep using Flow B.

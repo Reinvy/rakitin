@@ -1,35 +1,37 @@
 // Global setup for Jest tests
-const fs = require('fs-extra');
-const path = require('path');
+const os = require("os");
+const fs = require("fs-extra");
+const path = require("path");
+
+// Each test SUITE gets its OWN temporary directory inside the OS tmpdir.
+// Sharing a single directory across parallel Jest workers caused ENOENT
+// races whenever one worker wiped contents while another was scanning.
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rakitin-test-"));
+global.tempDir = tempDir;
 
 // Store original console for tests that need it
 const originalConsole = { ...console };
 
-// Create a temporary directory for test files
-const tempDir = path.join(__dirname, 'temp');
-global.tempDir = tempDir;
-
-// Setup before all tests
 beforeAll(async () => {
   // Ensure temp directory exists
   await fs.ensureDir(tempDir);
 
-  // Mock process.cwd to return temp directory for file operations
+  // Store original cwd for cleanup.
+  // NOTE: use a PLAIN function (not jest.fn) - jest.config resets all mocks
+  // between tests (`resetMocks: true`) which would strip its implementation,
+  // leaving process.cwd() returning undefined for the rest of the suite.
   const originalCwd = process.cwd;
-  process.cwd = jest.fn(() => tempDir);
-
-  // Store original cwd for cleanup
   global.originalCwd = originalCwd;
+  process.cwd = () => tempDir;
 });
 
-// Cleanup after all tests
 afterAll(async () => {
   // Restore original process.cwd
   if (global.originalCwd) {
     process.cwd = global.originalCwd;
   }
 
-  // Clean up temp directory
+  // Clean up this suite's private temp directory
   if (fs.existsSync(tempDir)) {
     await fs.remove(tempDir);
   }
@@ -40,7 +42,7 @@ afterEach(async () => {
   // Clear all mocks
   jest.clearAllMocks();
 
-  // Clean up temp directory contents but keep the directory
+  // Clean up this suite's temp contents but keep the directory
   if (fs.existsSync(tempDir)) {
     const files = await fs.readdir(tempDir);
     for (const file of files) {
@@ -50,7 +52,7 @@ afterEach(async () => {
 
   // Clear Logger instances
   try {
-    const { Logger } = require('../../lib/utils/logger');
+    const { Logger } = require("../lib/utils/logger");
     Logger.clearInstances();
   } catch (e) {
     // Logger module might not be loaded yet
@@ -58,7 +60,7 @@ afterEach(async () => {
 
   // Clear PathCache
   try {
-    const utils = require('../../lib/utils');
+    const utils = require("../lib/utils");
     if (utils.clearPathCache) {
       utils.clearPathCache();
     }

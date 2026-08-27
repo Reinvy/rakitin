@@ -1,0 +1,14 @@
+// user-profile Controller
+const { getAll } = require("../services/user-profile.service");
+
+exports.getAll = async (req, res, next) => {
+  try {
+    const data = await getAll(req);
+    res.status(200).json({
+      message: "Berhasil mendapatkan data",
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+};

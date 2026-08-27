@@ -1,0 +1,40 @@
+// user-profile Service (No ORM - in-memory store)
+// Replace the in-memory operations with real database calls when ready.
+
+
+const USERPROFILE_STORE = [];
+
+async function getAll(req) {
+  const { page = 1, limit = 10 } = req.query;
+  const start = (Number(page) - 1) * Number(limit);
+  const items = USERPROFILE_STORE.slice(start, start + Number(limit));
+  return { items, total: USERPROFILE_STORE.length };
+}
+
+async function getById(req) {
+  const { id } = req.params;
+  return USERPROFILE_STORE.find((item) => item.id === id) || null;
+}
+
+async function create(req) {
+  const item = { id: Date.now().toString(), ...req.body };
+  USERPROFILE_STORE.push(item);
+  return item;
+}
+
+async function update(req) {
+  const { id } = req.params;
+  const index = USERPROFILE_STORE.findIndex((item) => item.id === id);
+  if (index === -1) return null;
+  USERPROFILE_STORE[index] = { ...USERPROFILE_STORE[index], ...req.body };
+  return USERPROFILE_STORE[index];
+}
+
+async function remove(req) {
+  const { id } = req.params;
+  const index = USERPROFILE_STORE.findIndex((item) => item.id === id);
+  if (index === -1) return null;
+  return USERPROFILE_STORE.splice(index, 1)[0];
+}
+
+module.exports = { getAll, getById, create, update, remove };

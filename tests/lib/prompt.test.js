@@ -1,67 +1,69 @@
-const inquirer = require('inquirer');
-const { mainPrompt } = require('../../lib/prompt');
+const inquirer = require("inquirer");
+const { mainPrompt } = require("../../lib/prompt");
 
-// Mock inquirer
-jest.mock('inquirer');
+jest.mock("inquirer", () => {
+  class Separator {
+    constructor() {
+      this.type = "separator";
+    }
+  }
+  const create = () => ({ prompt: jest.fn(), Separator });
+  return { __esModule: true, ...create(), default: create() };
+});
 
-describe('Prompt', () => {
+const EXPECTED_FEATURES = [
+  "Module",
+  "Middleware",
+  "Util",
+  "Config",
+  "Router Integration",
+  "API Endpoint",
+  "API Documentation",
+  "API Validation",
+  "exit",
+];
+
+describe("Prompt", () => {
   beforeEach(() => {
-    // Reset all mocks before each test
-    jest.clearAllMocks();
+    inquirer.default.prompt.mockReset();
   });
 
-  test('should call inquirer.prompt with correct configuration', async () => {
-    // Mock the prompt method
-    const mockPrompt = jest.fn().mockResolvedValue({ feature: 'Module' });
-    inquirer.default.prompt = mockPrompt;
+  test("passes a list question containing all feature choices + separators", async () => {
+    inquirer.default.prompt.mockResolvedValue({ feature: "Module" });
 
-    // Call the function
-    const result = await mainPrompt();
+    await mainPrompt();
 
-    // Verify inquirer.prompt was called with correct configuration
-    expect(mockPrompt).toHaveBeenCalledTimes(1);
-    expect(mockPrompt).toHaveBeenCalledWith([
-      {
-        type: 'list',
-        name: 'feature',
-        message: 'Apa yang ingin Anda generate?',
-        choices: [
-          'Module',
-          'Middleware',
-          'Util',
-          'Config',
-          'Router Integration',
-        ],
-      },
-    ]);
+    expect(inquirer.default.prompt).toHaveBeenCalledTimes(1);
+    const [questions] = inquirer.default.prompt.mock.calls[0];
+    expect(questions).toHaveLength(1);
 
-    // Verify the result
-    expect(result).toEqual({ feature: 'Module' });
+    const q = questions[0];
+    expect(q.type).toBe("list");
+    expect(q.name).toBe("feature");
+
+    const values = q.choices
+      .filter((c) => typeof c === "object" && c.value !== undefined)
+      .map((c) => c.value);
+    expect(values).toEqual(EXPECTED_FEATURES);
+
+    // Separator instances are interleaved after the CLI groups and before Exit
+    const separators = q.choices.filter(
+      (c) => typeof c === "object" && c.type === "separator"
+    );
+    expect(separators).toHaveLength(2);
   });
 
-  test('should return the selected feature', async () => {
-    // Test with different feature selections
-    const features = ['Module', 'Middleware', 'Util', 'Config', 'Router Integration'];
-    
-    for (const feature of features) {
-      // Mock the prompt method to return the current feature
-      const mockPrompt = jest.fn().mockResolvedValue({ feature });
-      inquirer.default.prompt = mockPrompt;
-
-      // Call the function
+  test.each(EXPECTED_FEATURES.filter((f) => f !== "exit"))(
+    "returns the selected %s feature",
+    async (feature) => {
+      inquirer.default.prompt.mockResolvedValue({ feature });
       const result = await mainPrompt();
-
-      // Verify the result
       expect(result).toEqual({ feature });
     }
-  });
+  );
 
-  test('should handle inquirer prompt errors', async () => {
-    // Mock the prompt method to throw an error
-    const mockPrompt = jest.fn().mockRejectedValue(new Error('Prompt error'));
-    inquirer.default.prompt = mockPrompt;
-
-    // Call the function and expect it to throw
-    await expect(mainPrompt()).rejects.toThrow('Prompt error');
+  test("propagates prompt errors (handled by caller)", async () => {
+    inquirer.default.prompt.mockRejectedValue(new Error("User cancelled"));
+    await expect(mainPrompt()).rejects.toThrow("User cancelled");
   });
 });

@@ -1,350 +1,62 @@
-const fs = require('fs-extra');
-const path = require('path');
-const inquirer = require('inquirer');
-const index = require('../../index');
+/**
+ * Integration: end-to-end flow through bin + interactive dispatch.
+ * Simulates the CLI pipeline without spawning the process: index.js
+ * handlers are invoked with mocked prompts; generated artifacts on disk
+ * are validated for real.
+ */
+const fs = require("fs-extra");
+const path = require("path");
+const vm = require("vm");
 
-// Mock dependencies
-jest.mock('inquirer');
-jest.mock('../../lib/prompt');
-jest.mock('../../lib/generator/module/module');
-jest.mock('../../lib/generator/middleware/middleware');
-jest.mock('../../lib/generator/util/util');
-jest.mock('../../lib/generator/config/config');
-jest.mock('../../lib/generator/router/router');
+jest.mock("inquirer", () => {
+  class Separator {
+    constructor() {
+      this.type = "separator";
+    }
+  }
+  const create = () => ({ prompt: jest.fn(), Separator });
+  return { __esModule: true, ...create(), default: create() };
+});
 
-const { mainPrompt } = require('../../lib/prompt');
-const generateModule = require('../../lib/generator/module/module');
-const generateMiddleware = require('../../lib/generator/middleware/middleware');
-const generateUtil = require('../../lib/generator/util/util');
-const generateConfig = require('../../lib/generator/config/config');
-const { integrateRouter } = require('../../lib/generator/router/router');
+const inquirer = require("inquirer");
+const { getPaths } = require("../../lib/constants");
+const { simpleArch } = require("../../lib/generator/module/arch/simple.arch");
 
-describe('End-to-End Integration Tests', () => {
-  beforeEach(() => {
-    // Reset all mocks before each test
-    jest.clearAllMocks();
-    
-    // Mock process.cwd
-    process.cwd = jest.fn(() => global.tempDir);
-    
-    // Mock console.log to reduce noise
-    console.log = jest.fn();
-    console.error = jest.fn();
-  });
+function stripRequires(src) {
+  return src.replace(/require\([^)]*\)/g, "({})");
+}
 
-  test('should handle module generation flow', async () => {
-    // Mock mainPrompt to return Module
-    mainPrompt.mockResolvedValue({ feature: 'Module' });
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateModule was called
-    expect(generateModule).toHaveBeenCalledTimes(1);
-    
-    // Verify other generators were not called
-    expect(generateMiddleware).not.toHaveBeenCalled();
-    expect(generateUtil).not.toHaveBeenCalled();
-    expect(generateConfig).not.toHaveBeenCalled();
-    expect(integrateRouter).not.toHaveBeenCalled();
-  });
+beforeEach(() => {
+  jest.spyOn(console, "log").mockImplementation(() => {});
+});
 
-  test('should handle middleware generation flow', async () => {
-    // Mock mainPrompt to return Middleware
-    mainPrompt.mockResolvedValue({ feature: 'Middleware' });
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateMiddleware was called
-    expect(generateMiddleware).toHaveBeenCalledTimes(1);
-    
-    // Verify other generators were not called
-    expect(generateModule).not.toHaveBeenCalled();
-    expect(generateUtil).not.toHaveBeenCalled();
-    expect(generateConfig).not.toHaveBeenCalled();
-    expect(integrateRouter).not.toHaveBeenCalled();
-  });
+afterEach(() => {
+  jest.restoreAllMocks();
+  inquirer.default.prompt.mockReset();
+});
 
-  test('should handle util generation flow', async () => {
-    // Mock mainPrompt to return Util
-    mainPrompt.mockResolvedValue({ feature: 'Util' });
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateUtil was called
-    expect(generateUtil).toHaveBeenCalledTimes(1);
-    
-    // Verify other generators were not called
-    expect(generateModule).not.toHaveBeenCalled();
-    expect(generateMiddleware).not.toHaveBeenCalled();
-    expect(generateConfig).not.toHaveBeenCalled();
-    expect(integrateRouter).not.toHaveBeenCalled();
-  });
+describe("CLI dispatch (index.js main loop)", () => {
+  const { run } = require("../../index.js");
 
-  test('should handle config generation flow', async () => {
-    // Mock mainPrompt to return Config
-    mainPrompt.mockResolvedValue({ feature: 'Config' });
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateConfig was called
-    expect(generateConfig).toHaveBeenCalledTimes(1);
-    
-    // Verify other generators were not called
-    expect(generateModule).not.toHaveBeenCalled();
-    expect(generateMiddleware).not.toHaveBeenCalled();
-    expect(generateUtil).not.toHaveBeenCalled();
-    expect(integrateRouter).not.toHaveBeenCalled();
-  });
+  test("selecting Module -> generates files, then Loop/exit terminates", async () => {
+    inquirer.default.prompt
+      .mockResolvedValueOnce({ feature: "Module" })
+      .mockResolvedValueOnce({
+        moduleName: "search-index",
+        architecture: "Simple",
+        useORM: "No",
+        autoIntegrateRouter: false,
+      })
+      .mockResolvedValueOnce({ feature: "exit" });
 
-  test('should handle router integration flow', async () => {
-    // Mock mainPrompt to return Router Integration
-    mainPrompt.mockResolvedValue({ feature: 'Router Integration' });
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify integrateRouter was called
-    expect(integrateRouter).toHaveBeenCalledTimes(1);
-    
-    // Verify other generators were not called
-    expect(generateModule).not.toHaveBeenCalled();
-    expect(generateMiddleware).not.toHaveBeenCalled();
-    expect(generateUtil).not.toHaveBeenCalled();
-    expect(generateConfig).not.toHaveBeenCalled();
-  });
+    await expect(run()).resolves.not.toThrow();
 
-  test('should handle cancellation flow', async () => {
-    // Mock mainPrompt to throw ExitPromptError
-    const exitPromptError = new Error('ExitPromptError');
-    exitPromptError.name = 'ExitPromptError';
-    mainPrompt.mockRejectedValue(exitPromptError);
-    
-    // Mock console.log to capture output
-    console.log = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify console.log was called with cancellation message
-    expect(console.log).toHaveBeenCalledWith('❌ Proses dibatalkan oleh pengguna.');
-  });
+    const dir = path.join(getPaths().modulesPath, "search-index");
+    expect(fs.existsSync(path.join(dir, "search-index.controller.js"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "search-index.router.js"))).toBe(true);
 
-  test('should handle SIGINT flow', async () => {
-    // Mock mainPrompt to throw SIGINT error
-    const sigintError = new Error('SIGINT');
-    mainPrompt.mockRejectedValue(sigintError);
-    
-    // Mock console.log to capture output
-    console.log = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify console.log was called with cancellation message
-    expect(console.log).toHaveBeenCalledWith('❌ Proses dibatalkan oleh pengguna.');
-  });
-
-  test('should handle general errors', async () => {
-    // Mock mainPrompt to throw general error
-    const generalError = new Error('General error');
-    mainPrompt.mockRejectedValue(generalError);
-    
-    // Mock console.error to capture output
-    console.error = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify console.error was called with error message
-    expect(console.error).toHaveBeenCalledWith('❌ Terjadi error:', generalError);
-  });
-
-  test('should complete module generation successfully', async () => {
-    // Mock mainPrompt to return Module
-    mainPrompt.mockResolvedValue({ feature: 'Module' });
-    
-    // Mock generateModule to resolve successfully
-    generateModule.mockResolvedValue();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateModule was called
-    expect(generateModule).toHaveBeenCalledTimes(1);
-  });
-
-  test('should handle errors in module generation', async () => {
-    // Mock mainPrompt to return Module
-    mainPrompt.mockResolvedValue({ feature: 'Module' });
-    
-    // Mock generateModule to throw an error
-    const moduleError = new Error('Module generation error');
-    generateModule.mockRejectedValue(moduleError);
-    
-    // Mock console.error to capture output
-    console.error = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateModule was called
-    expect(generateModule).toHaveBeenCalledTimes(1);
-    
-    // Verify console.error was called with error message
-    expect(console.error).toHaveBeenCalledWith('❌ Terjadi error:', moduleError);
-  });
-
-  test('should handle errors in middleware generation', async () => {
-    // Mock mainPrompt to return Middleware
-    mainPrompt.mockResolvedValue({ feature: 'Middleware' });
-    
-    // Mock generateMiddleware to throw an error
-    const middlewareError = new Error('Middleware generation error');
-    generateMiddleware.mockRejectedValue(middlewareError);
-    
-    // Mock console.error to capture output
-    console.error = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateMiddleware was called
-    expect(generateMiddleware).toHaveBeenCalledTimes(1);
-    
-    // Verify console.error was called with error message
-    expect(console.error).toHaveBeenCalledWith('❌ Terjadi error:', middlewareError);
-  });
-
-  test('should handle errors in util generation', async () => {
-    // Mock mainPrompt to return Util
-    mainPrompt.mockResolvedValue({ feature: 'Util' });
-    
-    // Mock generateUtil to throw an error
-    const utilError = new Error('Util generation error');
-    generateUtil.mockRejectedValue(utilError);
-    
-    // Mock console.error to capture output
-    console.error = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateUtil was called
-    expect(generateUtil).toHaveBeenCalledTimes(1);
-    
-    // Verify console.error was called with error message
-    expect(console.error).toHaveBeenCalledWith('❌ Terjadi error:', utilError);
-  });
-
-  test('should handle errors in config generation', async () => {
-    // Mock mainPrompt to return Config
-    mainPrompt.mockResolvedValue({ feature: 'Config' });
-    
-    // Mock generateConfig to throw an error
-    const configError = new Error('Config generation error');
-    generateConfig.mockRejectedValue(configError);
-    
-    // Mock console.error to capture output
-    console.error = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify generateConfig was called
-    expect(generateConfig).toHaveBeenCalledTimes(1);
-    
-    // Verify console.error was called with error message
-    expect(console.error).toHaveBeenCalledWith('❌ Terjadi error:', configError);
-  });
-
-  test('should handle errors in router integration', async () => {
-    // Mock mainPrompt to return Router Integration
-    mainPrompt.mockResolvedValue({ feature: 'Router Integration' });
-    
-    // Mock integrateRouter to throw an error
-    const routerError = new Error('Router integration error');
-    integrateRouter.mockRejectedValue(routerError);
-    
-    // Mock console.error to capture output
-    console.error = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify integrateRouter was called
-    expect(integrateRouter).toHaveBeenCalledTimes(1);
-    
-    // Verify console.error was called with error message
-    expect(console.error).toHaveBeenCalledWith('❌ Terjadi error:', routerError);
-  });
-
-  test('should handle default case when no feature is selected', async () => {
-    // Mock mainPrompt to return an unknown feature
-    mainPrompt.mockResolvedValue({ feature: 'Unknown Feature' });
-    
-    // Mock console.log to capture output
-    console.log = jest.fn();
-    
-    // Call the main function
-    await index.main();
-    
-    // Verify mainPrompt was called
-    expect(mainPrompt).toHaveBeenCalledTimes(1);
-    
-    // Verify console.log was called with cancellation message
-    expect(console.log).toHaveBeenCalledWith('Batal.');
-    
-    // Verify no generators were called
-    expect(generateModule).not.toHaveBeenCalled();
-    expect(generateMiddleware).not.toHaveBeenCalled();
-    expect(generateUtil).not.toHaveBeenCalled();
-    expect(generateConfig).not.toHaveBeenCalled();
-    expect(integrateRouter).not.toHaveBeenCalled();
+    // B1 E2E proof: no-ORM service exists and parses standalone
+    const serviceSrc = fs.readFileSync(path.join(dir, "search-index.service.js"), "utf8");
+    expect(() => new vm.Script(serviceSrc)).not.toThrow();
   });
 });

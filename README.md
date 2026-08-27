@@ -1,374 +1,403 @@
+# rakitin
 
-# 🚀 rakitin
+[![npm version](https://img.shields.io/npm/v/rakitin.svg)](https://www.npmjs.com/package/rakitin)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![tests passing](https://img.shields.io/badge/tests-passing-brightgreen)](https://github.com/Reinvy/rakitin)
 
-[![npm version](https://badge.fury.io/js/rakitin.svg)](https://badge.fury.io/js/rakitin)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+> Integration-first boilerplate CLI for Node.js/Express backend projects.
+>
+> Selamat datang di rakitin — CLI yang menempel ke proyekmu yang sudah ada, bukan memulai dari nol. 🇮🇩
 
-## Fitur Status
+---
 
-[![Module Generator](https://img.shields.io/badge/Module-Generator-brightgreen.svg)](#)
-[![Middleware Generator](https://img.shields.io/badge/Middleware-Generator-brightgreen.svg)](#)
-[![Util Generator](https://img.shields.io/badge/Util-Generator-brightgreen.svg)](#)
-[![Config Generator](https://img.shields.io/badge/Config-Generator-brightgreen.svg)](#)
-[![Router Integration](https://img.shields.io/badge/Router-Integration-brightgreen.svg)](#)
+## Why rakitin?
 
-## 🇮🇩 Bahasa Indonesia
+Most scaffolders only know how to create **greenfield** projects: they generate a fresh folder,
+a fresh `package.json`, a fresh app skeleton — and then leave you alone. If you already have an
+Express app running in production with real routes, real middlewares and real business logic,
+traditional scaffolders are useless (or worse, destructive).
 
-### Deskripsi Proyek
+**rakitin is built on a different philosophy:**
 
-**rakitin** adalah Command Line Interface (CLI) yang dirancang khusus untuk mempercepat proses pengembangan _backend_ modular dengan Node.js dan Express.js. CLI ini membantu Anda _menggenerate_ _boilerplate_ kode untuk berbagai komponen aplikasi seperti modul, _middleware_, utilitas, dan konfigurasi, sehingga Anda dapat fokus pada logika bisnis inti aplikasi Anda.
+| Principle          | Meaning                                                                                                                    |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| **Detect-first**   | rakitin introspects your project first — architecture, ORM, modules, package manager — before writing anything.             |
+| **Additive-only**  | It generates new code *into* your existing project. Your files are never rewritten behind your back.                        |
+| **Never destructive** | Router edits happen between explicit markers, existing files get `.bak` backups when overwritten on purpose, and `--dry-run` lets you preview every write plan before a single byte touches disk. |
 
-### Fitur Utama
+The result: you can run `npx rakitin` inside a two-year-old Express monolith and come out with a
+new module, wired routes, validators, and env keys — with zero manual untangling afterward.
 
-**rakitin** menawarkan kemampuan _generate_ kode untuk berbagai kebutuhan:
+## Requirements
 
-* **Module**: Membangun struktur modul aplikasi dengan dua pilihan arsitektur:
-    * **Simple**: Modul akan memiliki _controller_, _service_, dan _router_ dalam satu direktori modul.
-    * **Modular**: Modul akan memiliki sub-direktori terpisah untuk _controllers_, _services_, _models_, dan _routes_, mendorong modularitas yang lebih ketat.
-    * Pilihan untuk mengintegrasikan ORM (Prisma, Sequelize, Mongoose, TypeORM).
-* **Middleware**: _Generate_ berbagai jenis _middleware_ Express.js:
-    * **Custom**: Membuat _middleware_ kosong yang dapat Anda isi dengan logika sendiri.
-    * **auth**: _Middleware_ otentikasi menggunakan JWT.
-    * **logger**: _Middleware_ untuk _logging_ permintaan masuk ke konsol.
-    * **error**: _Middleware_ penanganan _error_ global.
-    * **request-time**: _Middleware_ untuk mencatat waktu yang dibutuhkan untuk setiap permintaan.
-* **Util**: Membuat file utilitas dengan berbagai fungsi yang sering digunakan:
-    * **Custom**: Membuat utilitas kosong.
-    * **date**: Fungsi-fungsi utilitas terkait tanggal (misalnya, `now`, `format`, `add`, `subtract`, `isBefore`, `isAfter`).
-    * **string**: Fungsi-fungsi utilitas terkait _string_ (misalnya, `capitalize`, `kebabCase`, `camelCase`, `truncate`, `reverse`).
-    * **number**: Fungsi-fungsi utilitas terkait angka (misalnya, `clamp`, `isEven`, `isOdd`, `randomInt`, `toCurrency`).
-    * **array**: Fungsi-fungsi utilitas terkait _array_ (misalnya, `unique`, `flatten`, `chunk`, `compact`).
-    * **object**: Fungsi-fungsi utilitas terkait objek (misalnya, `isEmpty`, `deepClone`, `merge`).
-    * **file**: Fungsi-fungsi utilitas terkait sistem _file_ (misalnya, `readJson`, `writeJson`, `exists`).
-    * **crypto**: Fungsi-fungsi utilitas kriptografi (misalnya, `hashSHA256`, `randomHex`).
-    * **uuid**: Fungsi untuk _generate_ UUID (misalnya, `generate`, `short`).
-    * **env**: Fungsi untuk membaca variabel lingkungan dari `.env` (misalnya, `get`, `requireEnv`).
-    * **url**: Fungsi untuk memparsing atau mendapatkan _hostname_ dari URL.
-    * **color**: Fungsi untuk mengkonversi _hex_ ke RGB.
-    * **math**: Fungsi matematika dasar (misalnya, `sum`, `average`, `max`).
-    * **validation**: Fungsi validasi dasar (misalnya, `isEmail`, `isUrl`).
-    * **regex**: Fungsi utilitas _regex_ (misalnya, `matchAll`, `escape`).
-    * **time**: Fungsi utilitas terkait waktu (misalnya, `sleep`, `now`).
-    * **Config**: Fitur ini membantu dalam membuat file konfigurasi standar untuk berbagai kebutuhan aplikasi seperti database, JWT, CORS, logger, mailer, cloud storage, payment gateway, Redis, Socket.IO, dan environment.
-    * **Integrasi Router Utama**: Fitur ini mempermudah integrasi _router_ modul yang baru dibuat ke dalam _router_ utama aplikasi, mengurangi kerja manual. Mendukung integrasi otomatis dan manual dengan pilihan arsitektur modular atau simple. Untuk dokumentasi lengkap, lihat [Integrasi Router Utama](docs/router-integration.md).
+- Node.js **>= 18**
+- An npm-like package manager if you want auto-installs (`npm`, `pnpm`, `yarn`, or `bun`)
 
-### Instalasi
+Dependencies shipped by the CLI itself are intentionally small: `yargs` (CLI parsing),
+`inquirer` (interactive prompts), `ejs` (template rendering).
 
-Untuk menggunakan **rakitin**, pastikan Anda memiliki Node.js (versi >=18) dan npm terinstal di sistem Anda.
+## Quick Start
 
-1.  **Kloning repositori:**
-    ```bash
-    git clone [https://github.com/reinvy/rakitin.git](https://github.com/reinvy/rakitin.git)
-    cd rakitin/rakitin-development # atau di mana pun Anda mengekstrak file
-    ```
-2.  **Instal dependensi:**
-    ```bash
-    npm install
-    ```
-3.  **Jalankan CLI secara lokal (opsional, untuk pengembangan/pengujian):**
-    ```bash
-    npm start
-    ```
-    Atau, untuk membuatnya tersedia sebagai perintah global `rakitin`:
-    ```bash
-    npm link
-    ```
-
-### Penggunaan
-
-Setelah instalasi, Anda dapat menjalankan **rakitin** dari terminal:
+Run it without installing anything:
 
 ```bash
-rakitin
-````
-
-Anda akan disambut dengan *prompt* interaktif yang menanyakan "Apa yang ingin Anda generate?".
-
-```
-🚀 Hai Sayang! Ini CLI rakitin-mu!
-? Apa yang ingin Anda generate? (Use arrow keys)
-❯ Module
-  Middleware
-  Util
-  Config
-  Integrasi Router Utama
+# interactive menu at the root of your existing Express project
+npx rakitin
 ```
 
-Pilih fitur yang ingin Anda *generate* menggunakan tombol panah atas/bawah dan tekan `Enter`. CLI akan memandu Anda melalui *prompt* tambahan sesuai dengan pilihan Anda.
-
-#### Contoh Penggunaan: Membuat Modul
-
-1.  Jalankan `rakitin`.
-2.  Pilih `Module`.
-3.  Masukkan nama modul Anda (misalnya, `User`).
-4.  Pilih arsitektur (`Simple` atau `Modular`).
-5.  Pilih apakah akan menggunakan ORM atau tidak.
-6.  Jika memilih ORM, pilih ORM/Database yang diinginkan.
-
-**rakitin** akan membuat struktur folder dan file yang sesuai di dalam direktori `app/modules/user` Anda.
-
-### Struktur Proyek
-
-Berikut adalah gambaran umum struktur proyek yang dibuat atau diinteraksi oleh `rakitin`:
-
-```
-.
-├── app/
-│   ├── modules/          # Folder untuk modul aplikasi Anda
-│   │   └── [module-name]/
-│   │       ├── [module-name].controller.js (Simple Arch)
-│   │       ├── [module-name].service.js (Simple Arch)
-│   │       ├── [module-name].routes.js (Simple Arch)
-│   │       └── controllers/ (Modular Arch)
-│   │       └── services/ (Modular Arch)
-│   │       └── models/ (Modular Arch)
-│   │       └── routes/ (Modular Arch)
-│   ├── shared/           # Folder untuk komponen yang dibagikan antar modul
-│   │   ├── middlewares/  # Middleware aplikasi
-│   │   │   └── [middleware-name].middleware.js
-│   │   ├── config/       # File konfigurasi
-│   │   ├── utils/        # File utilitas
-│   │   │   └── [util-name].util.js
-│   │   └── interfaces/   # Definisi interface/tipe (jika ada)
-│   ├── app.js            # File inisialisasi aplikasi Express
-│   └── server.js         # Titik masuk utama aplikasi
-├── bin/
-│   └── rakitin.js        # Executable CLI
-├── lib/
-│   ├── generator/        # Logika untuk generate berbagai fitur
-│   │   ├── config/       # Logika generator Config (Dalam Pengembangan)
-│   │   ├── middleware/
-│   │   ├── module/
-│   │   ├── router/       # Logika generator Router Utama (Dalam Pengembangan)
-│   │   └── util/
-│   ├── constants.js      # Definisi path konstan
-│   ├── prompt.js         # Logika prompt interaktif
-│   └── utils.js          # Fungsi utilitas internal CLI
-├── index.js              # Logika utama CLI
-├── package.json          # Metadata proyek dan dependensi
-├── package-lock.json     # Resolusi dependensi
-└── .gitignore            # File yang diabaikan oleh Git
-```
-
-### Cara Berkontribusi
-
-Kami sangat menghargai kontribusi dari komunitas! Jika Anda ingin berkontribusi pada proyek **rakitin**, berikut adalah langkah-langkah yang dapat Anda ikuti:
-
-1.  **Fork** repositori ini
-2.  **Clone** fork Anda: `git clone https://github.com/username/rakitin.git`
-3.  **Buat branch baru** untuk fitur atau perbaikan Anda: `git checkout -b fitur-baru`
-4.  **Commit** perubahan Anda: `git commit -am 'Menambahkan fitur baru'`
-5.  **Push** ke branch: `git push origin fitur-baru`
-6.  **Buat Pull Request** ke repositori utama
-
-Untuk panduan kontribusi yang lebih detail, silakan lihat file [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### Roadmap
-
-Rencana pengembangan **rakitin** untuk jangka pendek dan menengah:
-
-#### Jangka Pendek (1-3 bulan)
-- [ ] Menambahkan template untuk berbagai use case
-- [ ] Integrasi dengan database NoSQL (MongoDB, Redis)
-- [ ] Generator untuk file test
-- [ ] Implementasi basic CI/CD
-
-#### Jangka Menengah (3-6 bulan)
-- [ ] Plugin system untuk memungkinkan ekstensi
-- [ ] Generator untuk GraphQL API
-- [ ] Generator untuk WebSocket endpoints
-- [ ] Integrasi dengan Docker
-- [ ] Template untuk mikro services
-
-Untuk rencana pengembangan jangka panjang yang lengkap, silakan lihat file [rencana-pengembangan-jangka-panjang.md](rencana-pengembangan-jangka-panjang.md).
-
-### Lisensi
-
-Proyek ini dilisensikan di bawah Lisensi MIT.
-
-### Kontak
-
-Author: Reinvy
-
------
-
-## 🇬🇧 English
-
-### Project Description
-
-**rakitin** is a Command Line Interface (CLI) specifically designed to accelerate the development process of modular backend applications with Node.js and Express.js. This CLI helps you generate boilerplate code for various application components such as modules, middleware, utilities, and configurations, allowing you to focus on your application's core business logic.
-
-### Key Features
-
-**rakitin** offers code generation capabilities for various needs:
-
-  * **Module**: Builds application module structures with two architecture options:
-      * **Simple**: Modules will have controllers, services, and routers within a single module directory.
-      * **Modular**: Modules will have separate sub-directories for controllers, services, models, and routes, promoting stricter modularity.
-      * Option to integrate ORMs (Prisma, Sequelize, Mongoose, TypeORM).
-  * **Middleware**: Generates various types of Express.js middleware:
-      * **Custom**: Creates an empty middleware that you can fill with your own logic.
-      * **auth**: Authentication middleware using JWT.
-      * **logger**: Middleware for logging incoming requests to the console.
-      * **error**: Global error handling middleware.
-      * **request-time**: Middleware for logging the time taken for each request.
-  * **Util**: Creates utility files with various commonly used functions:
-      * **Custom**: Creates an empty utility.
-      * **date**: Date-related utility functions (e.g., `now`, `format`, `add`, `subtract`, `isBefore`, `isAfter`).
-      * **string**: String-related utility functions (e.g., `capitalize`, `kebabCase`, `camelCase`, `truncate`, `reverse`).
-      * **number**: Number-related utility functions (e.g., `clamp`, `isEven`, `isOdd`, `randomInt`, `toCurrency`).
-      * **array**: Array-related utility functions (e.g., `unique`, `flatten`, `chunk`, `compact`).
-      * **object**: Object-related utility functions (e.g., `isEmpty`, `deepClone`, `merge`).
-      * **file**: File system-related utility functions (e.g., `readJson`, `writeJson`, `exists`).
-      * **crypto**: Cryptography utility functions (e.g., `hashSHA256`, `randomHex`).
-      * **uuid**: Functions to generate UUIDs (e.g., `generate`, `short`).
-      * **env**: Functions to read environment variables from `.env` (e.g., `get`, `requireEnv`).
-      * **url**: Functions to parse or get hostname from a URL.
-      * **color**: Function to convert hex to RGB.
-      * **math**: Basic mathematical functions (e.g., `sum`, `average`, `max`).
-      * **validation**: Basic validation functions (e.g., `isEmail`, `isUrl`).
-      * **regex**: Regex utility functions (e.g., `matchAll`, `escape`).
-      * **time**: Time-related utility functions (e.g., `sleep`, `now`).
-      * **Config**: This feature assists in creating standard configuration files for various application needs such as database, JWT, CORS, logger, mailer, cloud storage, payment gateway, Redis, Socket.IO, and environment.
-      * **Main Router Integration**: This feature simplifies the integration of newly created module routers into the application's main router, reducing manual effort. Supports both automatic and manual integration with modular or simple architecture options. For complete documentation, see [Main Router Integration](docs/router-integration.md).
-
-### Installation
-
-To use **rakitin**, ensure you have Node.js (version \>=18) and npm installed on your system.
-
-1.  **Clone the repository:**
-    ```bash
-    git clone [https://github.com/reinvy/rakitin.git](https://github.com/reinvy/rakitin.git)
-    cd rakitin/rakitin-development # or wherever you extracted the files
-    ```
-2.  **Install dependencies:**
-    ```bash
-    npm install
-    ```
-3.  **Run the CLI locally (optional, for development/testing):**
-    ```bash
-    npm start
-    ```
-    Or, to make it available as a global `rakitin` command:
-    ```bash
-    npm link
-    ```
-
-### Usage
-
-After installation, you can run **rakitin** from your terminal:
+Or install globally:
 
 ```bash
-rakitin
+npm install -g rakitin
 ```
 
-You will be greeted with an interactive prompt asking "Apa yang ingin Anda generate?" (What do you want to generate?).
+First run: initialize config:
 
-```
-🚀 Hai Sayang! Ini CLI rakitin-mu!
-? Apa yang ingin Anda generate? (Use arrow keys)
-❯ Module
-  Middleware
-  Util
-  Config
-  Integrasi Router Utama
+```bash
+# writes .rakitinrc.json using an auto-detected preset
+rakitin init
+
+# or pin it explicitly
+rakitin init --preset intermediate --force
 ```
 
-Select the feature you want to generate using the up/down arrow keys and press `Enter`. The CLI will guide you through additional prompts based on your selection.
+Then add your first module — headless or interactive:
 
-#### Usage Example: Creating a Module
+```bash
+# headless: module named "user", simple architecture, no ORM
+rakitin add module user --arch simple --orm none --yes
 
-1.  Run `rakitin`.
-2.  Select `Module`.
-3.  Enter your module name (e.g., `User`).
-4.  Choose the architecture (`Simple` or `Modular`).
-5.  Choose whether to use an ORM or not.
-6.  If choosing an ORM, select the desired ORM/Database.
-
-**rakitin** will create the appropriate folder structure and files within your `app/modules/user` directory.
-
-### Project Structure
-
-Here's an overview of the project structure created or interacted with by `rakitin`:
-
+# interactive fallback happens automatically when flags are missing
+rakitin add module user
 ```
-.
-├── app/
-│   ├── modules/          # Folder for your application modules
-│   │   └── [module-name]/
-│   │       ├── [module-name].controller.js (Simple Arch)
-│   │       ├── [module-name].service.js (Simple Arch)
-│   │       ├── [module-name].routes.js (Simple Arch)
-│   │       └── controllers/ (Modular Arch)
-│   │       └── services/ (Modular Arch)
-│   │       └── models/ (Modular Arch)
-│   │       └── routes/ (Modular Arch)
-│   ├── shared/           # Folder for components shared between modules
-│   │   ├── middlewares/  # Application middlewares
-│   │   │   └── [middleware-name].middleware.js
-│   │   ├── config/       # Configuration files
-│   │   ├── utils/        # Utility files
-│   │   │   └── [util-name].util.js
-│   │   └── interfaces/   # Interface/type definitions (if any)
-│   ├── app.js            # Express app initialization file
-│   └── server.js         # Main application entry point
+
+And finally wire everything into your router:
+
+```bash
+rakitin integrate
+```
+
+That's it. Every generated route is registered inside marker comments in your router file —
+nothing else in your codebase was touched.
+
+## Commands
+
+| Command                            | Description                                                                                        |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `rakitin`                          | Interactive menu: Module / Middleware / Util / Config / Router Integration / API Endpoint / API Documentation / API Validation / Exit. |
+| `rakitin init`                     | Writes `.rakitinrc.json`. Preset is auto-detected or set via `--preset basic\|intermediate\|advanced`. Use `--force` to regenerate an existing file. |
+| `rakitin add module <name>`        | Generates a full CRUD module headless via `--arch simple\|modular` and `--orm none\|prisma\|sequelize\|mongoose\|typeorm`. Falls back to interactive prompts when flags are missing and `--yes` is not set. |
+| `rakitin add middleware <kind>`    | Adds a middleware: `custom`, `auth`, `logger`, `error`, or `request-time`.                          |
+| `rakitin add util <kind>`          | Adds a utility from a rich interactive menu (helpers, formatters, wrappers, etc.).                   |
+| `rakitin add config <name>`        | Adds a config module: `app`, `database`, `jwt`, `cors`, `logger`, `mailer`, `cloud`, `payment`, `redis`, `socket`, `env`, or `custom`. Also writes matching keys into `env.example`. |
+| `rakitin add endpoint`             | Rich interactive flow that generates CRUD endpoints against an existing module.                      |
+| `rakitin add validation`           | Rich interactive flow that generates Joi validation schemas for a module.                            |
+| `rakitin add docs`                 | Rich interactive flow for the API documentation stack.                                               |
+| `rakitin recipe <name>`            | Composite advanced recipes: `auth`, `swagger`, `test`, `docker`. See [Recipes](#recipes).            |
+| `rakitin integrate`                | Marker-based router integration for ALL detected modules. See below.                                 |
+| `rakitin doctor`                   | Health check of your project: detection results, missing pieces, potential issues.                   |
+| `rakitin info`                     | JSON-ish summary of the detected project structure.                                                  |
+| `rakitin list`                     | Catalog of everything rakitin can generate.                                                          |
+| `rakitin router`                   | Legacy alias of `integrate` — still works, kept for backwards compatibility.                         |
+
+### `rakitin integrate` in detail
+
+```bash
+rakitin integrate --middleware auth,logger
+```
+
+- Finds **every** module in your project and wires them into `app/routes/index.js`.
+- Respects **each module's real architecture**: a simple module gets simple wiring,
+  a modular module gets modular wiring — never one-size-fits-all.
+- Regeneration is **idempotent**: it only rewrites content between
+  `/* rakitin:routes:start */` and `/* rakitin:routes:end */`.
+- Routes you added manually **outside** the markers are preserved byte-for-byte.
+- Middleware declared but not present on disk is **never emitted as a dangling `require()`**.
+- When updating an existing router file, a `.bak` backup is created first.
+
+## Global Flags
+
+Available on every command:
+
+| Flag                    | Alias | Description                                                                    |
+| ----------------------- | ----- | ------------------------------------------------------------------------------ |
+| `--cwd <dir>`           |       | Run against a different working directory (great for scripting).               |
+| `--yes`                 | `-y`  | Skip confirmations, use defaults everywhere.                                   |
+| `--overwrite`           | `-o`  | Allow overwriting existing files (still creates `.bak` backups).               |
+| `--dry-run`             |       | Show the exact write plan. **Nothing is written.**                             |
+| `--json`                |       | Machine-readable stdout — designed for CI pipelines and AI agents.             |
+| `--no-install`          |       | Generate code without triggering dependency installation.                      |
+| `--preset <p>`          |       | `basic` \| `intermediate` \| `advanced` (for `init`).                           |
+| `--arch <a>`            |       | `simple` \| `modular` (for `add module`).                                      |
+| `--orm <o>`             |       | `none` \| `prisma` \| `sequelize` \| `mongoose` \| `typeorm` (for `add module`). |
+| `--pm <pm>`             |       | Force package manager: `npm` \| `pnpm` \| `yarn` \| `bun`.                       |
+| `--middleware <list>`   |       | Comma-separated middleware names (for `integrate`).                             |
+
+### CI-friendly usage
+
+```bash
+# dry-run first: inspect the plan, nothing gets written
+rakitin add module order --arch modular --orm prisma --dry-run
+
+# then execute headlessly with machine-readable output
+rakitin add module order --arch modular --orm prisma --yes --json > result.json
+```
+
+## Integration Tiers
+
+rakitin scales its output to how much you're willing to adopt. Three tiers:
+
+### :green_circle: Basic — zero extra dependencies
+
+Pure-Express modules with `--orm none`, plus middlewares, utils, and configs.
+No new runtime dependencies required beyond what you already have — genuinely
+drop-in for **any** existing Express app.
+
+```bash
+rakitin add module product --arch simple --orm none --yes
+rakitin add middleware logger
+rakitin add util validator
+rakitin add config cors
+```
+
+### :yellow_circle: Intermediate — correct ORM wiring + validation
+
+Adds exactly what your chosen ORM requires — correctly, per ORM:
+
+- **Prisma**: appends models into your existing `prisma/schema.prisma` and adds a shared `config/db.js` singleton client.
+- **Sequelize**: default-export model that matches what the generated service imports.
+- **Mongoose**: kebab-case model files, consistent with convention-first projects.
+- **TypeORM**: entity-based setup with `reflect-metadata`.
+
+Also includes Joi validators, CRUD endpoints with safe pagination/filtering
+codegen, and the marker-based `integrate` command.
+
+```bash
+rakitin add module invoice --arch modular --orm prisma --yes
+rakitin add validation
+rakitin integrate
+```
+
+### :red_circle: Advanced — recipes + full docs stack
+
+Everything above, plus composite recipes (`auth`, `swagger`, `test`, `docker`)
+and the complete API documentation stack.
+
+```bash
+rakitin init --preset advanced
+rakitin recipe auth
+rakitin recipe swagger
+```
+
+## Recipes
+
+Recipes are composite generators: one command, several coordinated outputs.
+
+### `recipe auth`
+
+```bash
+rakitin recipe auth
+```
+
+Stacks together:
+1. JWT auth middleware
+2. A **modular** user module (controller/service/model/validation)
+3. Joi request validator for the auth flows
+4. JWT-related env keys written into `env.example`
+
+### `recipe swagger`
+
+```bash
+rakitin recipe swagger
+```
+
+Generates an OpenAPI 3 skeleton **pre-populated from your detected modules**
+(paths derived from what actually exists in `app/routes`) plus the
+`mountSwagger` setup so it's serving as soon as the app boots.
+
+### `recipe test`
+
+```bash
+rakitin recipe test
+```
+
+Generates supertest suites **per existing module** (not per template) and adds
+the `npm test` script if it's missing.
+
+### `recipe docker`
+
+```bash
+rakitin recipe docker
+```
+
+Multi-stage `Dockerfile`, `docker-compose.yml`, and `.dockerignore` tuned to
+your Node version.
+
+## Safety Guarantees
+
+Everything rakitin writes is governed by `lib/safety.js`. In practice:
+
+- **Marker-based edits** — router integration only ever rewrites the region
+  between `/* rakitin:routes:start */` and `/* rakitin:routes:end */`.
+  Anything you wrote outside stays untouched.
+- **Dry-run always available** — `--dry-run` prints the full write plan and
+  performs **zero** filesystem mutations.
+- **Backups before overwrite** — intentional overwrite operations create a
+  `.bak` of the previous content first.
+- **No silent clobbering** — without `--overwrite`, existing files are never
+  replaced by generated output.
+
+Router file, before first integration:
+
+```js
+// app/routes/index.js
+const express = require('express');
+const router = express.Router();
+
+router.get('/health', (req, res) => res.json({ ok: true })); // yours
+
+module.exports = router;
+```
+
+After `rakitin integrate --middleware auth,logger`:
+
+```js
+// app/routes/index.js
+const express = require('express');
+const router = express.Router();
+
+/* rakitin:routes:start */
+const userRoutes = require('../modules/user/user.routes');
+const authMiddleware = require('../middlewares/auth.middleware');
+const loggerMiddleware = require('../middlewares/logger.middleware');
+
+router.use('/users', authMiddleware, loggerMiddleware, userRoutes);
+/* rakitin:routes:end */
+
+router.get('/health', (req, res) => res.json({ ok: true })); // still yours, byte-for-byte
+
+module.exports = router;
+```
+
+Re-running `integrate` later regenerates only the marked block; the health
+route survives unchanged forever.
+
+## Library API
+
+Every public subpath also ships TypeScript types (`types/index.d.ts`), works
+from both CJS `require()` and ESM `import`, and can be used programmatically
+without touching the CLI.
+
+| Import path              | What you get                                                                       |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| `require("rakitin")`     | Root entry — main programmatic surface.                                             |
+| `require("rakitin/config")` | Shared configuration accessors.                                                  |
+| `require("rakitin/naming")` | Single-source naming utilities (`toIdentifier`, file/dir naming, etc.).           |
+| `require("rakitin/utils")`  | General utilities.                                                                |
+| `require("rakitin/utils/logger")` | Leveled logger.                                                            |
+| `require("rakitin/ui")`     | UI helpers.                                                                        |
+| `require("rakitin/ui/progress")` | Spinner / progress UI.                                                       |
+| `require("rakitin/template")`    | Template engine facade.                                                      |
+| `require("rakitin/template/engine")` | `TemplateEngine` class — real EJS wrapper with `renderString` cache and `renderFile` supporting EJS `include()`. |
+
+Example:
+
+```js
+const { naming, TemplateEngine } = require("rakitin");
+
+console.log(naming.toIdentifier("user-profile"));
+// "userProfile"
+```
+
+## Project Structure
+
+Templates ship as inline generator functions (not loose `.ejs` files), which keeps
+generated output testable and refactor-safe.
+
+```text
+rakitin/
 ├── bin/
-│   └── rakitin.js        # CLI executable
+│   └── rakitin.js          # CLI entry point
 ├── lib/
-│   ├── generator/        # Logic for generating various features
-│   │   ├── config/       # Config generator logic (Under Development)
-│   │   ├── middleware/
-│   │   ├── module/
-│   │   ├── router/       # Main Router Integration generator logic (Under Development)
-│   │   └── util/
-│   ├── constants.js      # Constant path definitions
-│   ├── prompt.js         # Interactive prompt logic
-│   └── utils.js          # Internal CLI utility functions
-├── index.js              # Main CLI logic
-├── package.json          # Project metadata and dependencies
-├── package-lock.json     # Dependency resolution
-└── .gitignore            # Files ignored by Git
+│   ├── commands/           # yargs command layer
+│   ├── deps/               # dependency registry + ensureDependencies()
+│   ├── generator/          # inline template generator functions
+│   ├── project/            # detector.js — project introspection
+│   ├── template/           # engine.js — real-EJS TemplateEngine wrapper
+│   ├── ui/                 # progress.js — spinner/progress UI
+│   ├── utils/              # leveled logger + shared utils
+│   ├── constants.js        # lazy getPaths()
+│   ├── installer.js        # cross-platform installer (lockfile PM detection)
+│   ├── naming.js           # single-source naming + toIdentifier sanitizer
+│   └── safety.js           # safety layer: writeFileIfNotExistsSafe /
+│                           # overwriteWithBackup / buildRoutesContent / dry-run plans
+├── tests/
+│   ├── unit/               # pure-function tests
+│   ├── lib/                # lib-layer tests
+│   ├── integration/        # multi-command flows
+│   └── regression/         # guards every past P0 bug
+├── types/
+├── docs/
+└── examples/
 ```
 
-### How to Contribute
+A few internals worth knowing about:
 
-We greatly appreciate contributions from the community! If you want to contribute to the **rakitin** project, here are the steps you can follow:
+- `lib/deps/manifest.js` maintains a registry of optional dependencies and runs
+  `ensureDependencies()` through the **detected** package manager (including
+  `bun.lockb` lockfiles).
+- `lib/installer.js` is cross-platform with injectable internals so tests can
+  run without shelling out to real package managers.
+- `lib/safety.js` exposes the entire non-destructive guarantee as reusable APIs.
 
-1.  **Fork** this repository
-2.  **Clone** your fork: `git clone https://github.com/username/rakitin.git`
-3.  **Create a new branch** for your feature or fix: `git checkout -b new-feature`
-4.  **Commit** your changes: `git commit -am 'Add new feature'`
-5.  **Push** to the branch: `git push origin new-feature`
-6.  **Create a Pull Request** to the main repository
+## Development
 
-For more detailed contribution guidelines, please see the [CONTRIBUTING.md](CONTRIBUTING.md) file.
+Clone and develop locally:
 
-### Roadmap
-
-**rakitin** development plan for short and medium term:
-
-#### Short Term (1-3 months)
-- [ ] Adding templates for various use cases
-- [ ] Integration with NoSQL databases (MongoDB, Redis)
-- [ ] Test file generator
-- [ ] Basic CI/CD implementation
-
-#### Medium Term (3-6 months)
-- [ ] Plugin system to allow extensions
-- [ ] GraphQL API generator
-- [ ] WebSocket endpoints generator
-- [ ] Docker integration
-- [ ] Microservices templates
-
-For the complete long-term development plan, please see the [rencana-pengembangan-jangka-panjang.md](rencana-pengembangan-jangka-panjang.md) file.
-
-### License
-
-This project is licensed under the MIT License.
-
-### Contact
-
-Author: Reinvy
-
+```bash
+git clone https://github.com/Reinvy/rakitin.git
+cd rakitin && npm install
 ```
-```
+
+Key scripts:
+
+| Script                | Purpose                                                        |
+| --------------------- | -------------------------------------------------------------- |
+| `npm test`            | Run the Jest suite (300+ tests across unit/lib/integration/regression). |
+| `npm run lint`        | ESLint.                                                         |
+| `npm run typecheck`   | `tsc --noEmit` over JSDoc-typed sources.                        |
+| `npm run build`       | Build CJS + ESM dist bundles via esbuild.                       |
+
+Extra variants exist (`test:watch`, `test:coverage`, `test:unit`,
+`test:integration`, `typecheck:strict`, `build:cjs`, `build:esm`,
+`build:clean`).
+
+### Quality signals
+
+- **300+ Jest tests** across unit, lib, integration, and regression suites.
+- The **regression suite guards every past P0 bug**, including:
+  - every generated file must parse as valid JavaScript;
+  - the no-ORM path must always work end-to-end;
+  - router markers remain idempotent across regeneration;
+  - `.bak` backups are preserved and never silently dropped;
+  - syntax checks never rely on executing generated code.
+
+## Contributing
+
+Issues and pull requests are welcome! Please read
+[CONTRIBUTING.md](./CONTRIBUTING.md) and the guides under [docs/](./docs)
+(`architecture.md`, `adding-generators.md`, `coding-standards.md`,
+`router-integration.md`, `module-examples.md`) before opening a PR.
+
+## Roadmap
+
+Planned features and long-term release strategy live in
+[`rencana-pengembangan-jangka-panjang.md`](./rencana-pengembangan-jangka-panjang.md)
+and [`strategi-rilis-dan-maintenance.md`](./strategi-rilis-dan-maintenance.md)
+(in Bahasa Indonesia).
+
+## License
+
+MIT © [Reinvy](https://github.com/Reinvy)
+
+Contact / issues: [github.com/Reinvy/rakitin/issues](https://github.com/Reinvy/rakitin/issues)

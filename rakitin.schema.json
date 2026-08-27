@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/Reinvy/rakitin/main/rakitin.schema.json",
+  "title": "rakitin configuration",
+  "description": "Configuration written by `rakitin init` and consumed by subsequent commands to inherit project conventions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["preset", "version"],
+  "properties": {
+    "preset": {
+      "type": "string",
+      "enum": ["basic", "intermediate", "advanced"],
+      "description": "Integration tier the project was initialized with."
+    },
+    "version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Config file schema version."
+    },
+    "detected": {
+      "type": "object",
+      "description": "Snapshot of the project state at init time (informational).",
+      "properties": {
+        "expressVersion": { "type": ["string", "null"] },
+        "packageManager": { "type": ["string", "null"], "enum": ["npm", "pnpm", "yarn", "bun", null] },
+        "modules": { "type": "integer", "minimum": 0 },
+        "mixedArchitectures": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO timestamp when this config was written."
+    }
+  }
+}

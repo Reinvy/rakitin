@@ -4,6 +4,9 @@ const generateMiddleware = require("./lib/generator/middleware/middleware");
 const generateUtil = require("./lib/generator/util/util");
 const generateConfig = require("./lib/generator/config/config");
 const { integrateRouter } = require("./lib/generator/router/router");
+const generateEndpoint = require("./lib/generator/api/endpoint");
+const generateDocumentation = require("./lib/generator/api/documentation");
+const generateValidation = require("./lib/generator/api/validation");
 
 async function main() {
   const { feature } = await mainPrompt();
@@ -19,16 +22,31 @@ async function main() {
       return generateConfig();
     case "Router Integration":
       return integrateRouter();
+    case "API Endpoint":
+      return generateEndpoint();
+    case "API Documentation":
+      return generateDocumentation();
+    case "API Validation":
+      return generateValidation();
+    case "exit":
+      console.log("👋 Sampai jumpa!");
+      return;
     default:
       console.log("Batal.");
   }
 }
 
-main().catch((err) => {
-  if (err?.name === "ExitPromptError" || err?.message?.includes("SIGINT")) {
-    console.log("❌ Proses dibatalkan oleh pengguna.");
-    process.exit(0);
-  }
-  console.error("❌ Terjadi error:", err);
-  process.exit(1);
-});
+module.exports = { main, run: main };
+
+// Auto-run ONLY when executed directly (`node index.js` / bin shim),
+// not when required by tests or library consumers.
+if (require.main === module) {
+  main().catch((err) => {
+    if (err?.name === "ExitPromptError" || err?.message?.includes("SIGINT")) {
+      console.log("❌ Proses dibatalkan oleh pengguna.");
+      process.exit(0);
+    }
+    console.error("❌ Terjadi error:", err);
+    process.exit(1);
+  });
+}
