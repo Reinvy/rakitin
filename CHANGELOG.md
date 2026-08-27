@@ -8,8 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Configurable ORM in `rakitin init`**: `rakitin init --orm <prisma|sequelize|mongoose|typeorm|none>` configures and saves the default ORM stack into `.rakitinrc.json`.
-- **Default Prisma ORM**: All module generators (`rakitin add module`), composite recipes (`rakitin recipe auth`), and interactive menus now default to **Prisma** unless configured or overridden via `--orm`.
+- **Interactive Wizard in `rakitin init`**: `rakitin init` now features an interactive guided setup for new Express generator project scaffolding (`npx express-generator --no-view`), default architecture selection (`modular`/`simple`), default ORM selection (`prisma`/`sequelize`/`mongoose`/`typeorm`/`none`), package manager selection (`npm`/`pnpm`/`yarn`/`bun`), and router auto-integration.
+- **Express Generator Scaffolding**: Option to scaffold a fresh Express project directly via `npx express-generator --no-view` with automatic routing integration into `app.js` (`app.use('/api', rakitinRouter)`).
+- **`rakitin config` CLI Command**: New `rakitin config` command (`list`, `get <key>`, `set <key> <value>`, and interactive) allowing easy management and modification of `.rakitinrc.json`.
+- **Zero-Prompt Config-Driven Module Generation**: Module generation (`rakitin add module` and interactive menu) strictly respects `.rakitinrc.json` configuration, asking only for the module name without redundant intermediate prompts.
+- **Automatic Router Integration**: Configurable `autoIntegrateRouter` automatically wires newly created modules into `app/routes/index.js`.
 
 ## [2.0.0] - 2026-08-27
 

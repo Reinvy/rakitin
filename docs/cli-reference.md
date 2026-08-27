@@ -7,11 +7,12 @@ existing Node.js/Express project (`engines.node >= 18`), never clobbers
 user files without a `.bak` backup, and manages main-router wiring through
 idempotent marker blocks.
 
-## 1. Synopsis & exit-code philosophy
+### 1. Synopsis & exit-code philosophy
 
 ```
-rakitin                                # bare → legacy interactive menu
-rakitin init                           # detect project + write .rakitinrc.json
+rakitin                                # bare → interactive menu
+rakitin init                           # wizard / headless init + write .rakitinrc.json
+rakitin config [get|set|list]          # view or update configuration
 rakitin add <thing> [name]             # module|middleware|util|config|endpoint|validation|docs
 rakitin recipe <name>                  # auth|swagger|test|docker
 rakitin integrate                      # marker-based router wiring
@@ -71,19 +72,19 @@ numbered `🧭 Next steps:` block.
 
 ### Which command honors what
 
-| Flag | init | add module | add mw/util/config/endp/valid/docs | recipe * | integrate |
-| --- | :-: | :-: | :-: | :-: | :-: |
-| `--cwd` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `--yes/-y` | – | ✅ skips prompts¹ | mw custom name only | – | – |
-| `--overwrite/-o` | ✅ regenerates rc | –² | –² | –² | – |
-| `--dry-run` | – (writes anyway) | ✅ | ✅ | ✅ | ✅ |
-| `--json` | ✅ | ✅³ | ✅³ | ✅ | ✅ |
-| `--no-install` | – | ✅ | mw only | –⁴ | – |
-| `--preset` | ✅ | – | – | – | – |
-| `--arch` | – | ✅ | – | `recipe auth` | – |
-| `--orm` | – | ✅ | – | – | – |
-| `--pm` | – | ✅ deps | – | auth/swagger/test installs | – |
-| `--middleware csv` | – | – | – | – | ✅ |
+| Flag | init | config | add module | add mw/util/config/endp/valid/docs | recipe * | integrate |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| `--cwd` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--yes/-y` | ✅ | ✅ | ✅ skips prompts¹ | mw custom name only | – | – |
+| `--overwrite/-o` | ✅ regenerates rc | – | –² | –² | –² | – |
+| `--dry-run` | – (writes anyway) | – | ✅ | ✅ | ✅ | ✅ |
+| `--json` | ✅ | ✅ | ✅³ | ✅³ | ✅ | ✅ |
+| `--no-install` | ✅ | – | ✅ | mw only | –⁴ | – |
+| `--preset` | ✅ | – | – | – | – | – |
+| `--arch` | ✅ | – | ✅ | – | `recipe auth` | – |
+| `--orm` | ✅ | – | ✅ | – | – | – |
+| `--pm` | ✅ | – | ✅ deps | – | auth/swagger/test installs | – |
+| `--middleware csv` | – | – | – | – | – | ✅ |
 
 ¹ Without a positional name, `--yes` is rejected (“Nama modul wajib ada”).
 ² File generation primitives are write-if-absent; existing files surface in
@@ -97,35 +98,62 @@ markers + `.bak`, not this flag). ³ Interactive flows still print prompt UI.
 
 ### 3.1 `rakitin init`
 
-Detects the project and writes `.rakitinrc.json`; idempotent without
-`--overwrite`.
+Inisialisasi proyek, scaffolding Express generator baru (opsional), setup database dasar, dan konfigurasi `.rakitinrc.json`.
 
 ```bash
 # Synopsis
-rakitin init [--preset basic|intermediate|advanced] [--orm prisma|sequelize|mongoose|typeorm|none] [--overwrite] [--cwd DIR]
+rakitin init [--express] [--arch modular|simple] [--orm prisma|sequelize|mongoose|typeorm|none] \
+    [--pm npm|pnpm|yarn|bun] [--auto-integrate] [--preset basic|intermediate|advanced] \
+    [--overwrite] [--cwd DIR] [--yes] [--json]
 ```
 
 | Option | Effect |
 | --- | --- |
+| `--express` | Generate project Express baru dari awal menggunakan `npx express-generator --no-view` dan menghubungkan `app.js` ke `/api`. |
+| `--arch` | Set arsitektur proyek default (`modular` atau `simple`). |
+| `--orm` | Set ORM/Database proyek default (`prisma`, `sequelize`, `mongoose`, `typeorm`, `none`). |
+| `--pm` | Set package manager yang digunakan (`npm`, `pnpm`, `yarn`, `bun`). |
+| `--auto-integrate` | Aktifkan integrasi otomatis modul baru ke `app/routes/index.js` (default: `true`). |
 | `--preset` | Force preset; unknown values abort. Omitted ⇒ auto-preset: any ORM installed ⇒ `intermediate`, else `basic`. |
-| `--orm` | Set project-wide default ORM (persisted in `.rakitinrc.json`). Choices: `prisma` (default), `sequelize`, `mongoose`, `typeorm`, `none`. |
-| `--overwrite/-o` | Regenerate config even if present (acts as `force`). |
-| `--json` | Standard object. Dry-run not honored here. |
+| `--overwrite/-o` / `--force/-f` | Regenerasi konfigurasi dan file base meskipun sudah ada. |
+| `--json` | Standard output object JSON. |
 
-Written shape: `$schema`, `preset`, `orm`, `defaultArchitecture`, `version: 2`,
-`detected {expressVersion, packageManager, modules, mixedArchitectures}`,
-`generatedAt`. Detection trusts per-module structure, so mixed layouts are
-reported honestly (see [tiers](./integration-tiers.md#1-the-three-tiers-at-a-glance)).
+Behavior:
+* Mode Interaktif (TTY): Menampilkan wizard pemilihan project Express dari awal, arsitektur, ORM, package manager, dan router auto-integrate.
+* Mode Headless / Flags: Melewati wizard dan langsung menulis konfigurasi sesuai flags.
+* Menyiapkan base router (`app/routes/index.js`) dan database connection singleton (`app/shared/config/db.js` atau `data-source.js` / Prisma base schema).
 
 ```bash
-rakitin init                                   # auto-preset baseline (defaults to Prisma)
-rakitin init --orm sequelize                   # configure Sequelize as the project default ORM
-rakitin init --preset advanced --overwrite     # explicit, regenerating
-CI=true rakitin init --preset basic --json | jq -e '.ok == true'   # CI check
-PLAN=$(rakitin init --preset intermediate --json); echo "$PLAN" | jq -r '.nextSteps[]'   # agent
+rakitin init                                                    # interactive wizard
+rakitin init --express --arch modular --orm prisma --pm npm     # express generator scaffold
+rakitin init --orm sequelize --arch simple --yes                # non-interactive headless init
+rakitin init --preset advanced --overwrite                      # explicit, regenerating
 ```
 
-### 3.2 `rakitin add module <name>`
+### 3.2 `rakitin config`
+
+Lihat atau ubah konfigurasi `.rakitinrc.json` proyek.
+
+```bash
+# Synopsis
+rakitin config [list|get|set|interactive] [key] [value] [--json]
+```
+
+| Subcommand | Usage | Description |
+| --- | --- | --- |
+| `rakitin config` / `list` | `rakitin config list` | Tampilkan seluruh konfigurasi aktif dalam format tabel atau JSON. |
+| `rakitin config get <key>` | `rakitin config get orm` | Ambil nilai konfigurasi tertentu (mendukung alias: `arch`, `pm`, dll.). |
+| `rakitin config set <key> <value>` | `rakitin config set orm mongoose` | Ubah nilai konfigurasi secara langsung di `.rakitinrc.json`. |
+
+```bash
+rakitin config list
+rakitin config get orm
+rakitin config set orm mongoose
+rakitin config set defaultArchitecture simple
+rakitin config set autoIntegrateRouter false
+```
+
+### 3.3 `rakitin add module <name>`
 
 Full feature module; headless-first, remaining decisions prompted unless
 `--yes`.

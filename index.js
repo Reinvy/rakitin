@@ -28,6 +28,17 @@ async function main() {
       return generateDocumentation();
     case "API Validation":
       return generateValidation();
+    case "Init & Config": {
+      const fs = require("fs");
+      const path = require("path");
+      if (!fs.existsSync(path.join(process.cwd(), ".rakitinrc.json"))) {
+        const { initCommand } = require("./lib/commands/init");
+        return initCommand();
+      } else {
+        const { configCommand } = require("./lib/commands/config");
+        return configCommand("interactive");
+      }
+    }
     case "exit":
       console.log("👋 Sampai jumpa!");
       return;

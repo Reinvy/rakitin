@@ -20,6 +20,7 @@ const EXPECTED_FEATURES = [
   "API Endpoint",
   "API Documentation",
   "API Validation",
+  "Init & Config",
   "exit",
 ];
 
