@@ -55,6 +55,10 @@ See `docs/migration-v1-to-v2.md` for the breaking-change guide.
   contributors; docs: cli-reference, integration-tiers, migration-v1-to-v2,
   rewritten architecture/coding-standards/adding-generators/router-integration/
   module-examples.
+- Tooling: ESLint v9 flat config (0-error gate), Prettier (.prettierrc +
+  format scripts), modernized CI workflow (Node 18/20/22 × 3 OS matrix,
+  non-no-op lint/typecheck/build jobs, end-to-end headless smoke job with a
+  dry-run leak detector).
 
 ### Fixed
 - No-ORM module generation crashed outright (empty `none.orm.js`; service

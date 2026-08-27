@@ -95,7 +95,9 @@
     "build:esm": "node build.config.js --esm",
     "build:clean": "node build.config.js --clean",
     "prepublishOnly": "npm run build && npm run typecheck",
-    "postinstall": "prisma skills sync || exit 0"
+    "postinstall": "prisma skills sync || exit 0",
+    "format": "prettier --write \"lib/**/*.js\" \"bin/*.js\" \"tests/**/*.js\" \"index.js\"",
+    "format:check": "prettier --check \"lib/**/*.js\" \"bin/*.js\""
   },
   "dependencies": {
     "@prisma/client": "^7.10.0",
@@ -117,6 +119,7 @@
     "fs-extra": "^11.3.2",
     "jest": "^30.2.0",
     "jest-mock": "^30.2.0",
+    "prettier": "^3.9.6",
     "typescript": "^5.6.0"
   },
   "rakitin": {

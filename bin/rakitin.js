@@ -18,9 +18,9 @@ function ensurePackage(packageName) {
     require(packageName);
   } catch (e) {
     console.log(`📦 Menginstall ${packageName}...`);
-    const { execSync } = require('child_process');
+    const { execSync } = require("child_process");
     try {
-      execSync(`npm install ${packageName}`, { stdio: 'inherit' });
+      execSync(`npm install ${packageName}`, { stdio: "inherit" });
       console.log(`✅ ${packageName} berhasil diinstall`);
     } catch (installError) {
       console.error(`❌ Gagal menginstall ${packageName}: ${installError.message}`);
@@ -46,14 +46,31 @@ const cli = yargs
   .usage("Usage: $0 [command] [options]")
   .example("$0 add module user --arch modular --orm mongoose", "generate modul user")
   .option("cwd", { type: "string", describe: "Project root (default: cwd)" })
-  .option("yes", { alias: "y", type: "boolean", describe: "Asumsikan default & jangan tanya" })
-  .option("overwrite", { alias: "o", type: "boolean", describe: "Izinkan overwrite terkontrol (.bak dibuat)" })
-  .option("dry-run", { type: "boolean", describe: "Tampilkan rencana tanpa menulis file" })
+  .option("yes", {
+    alias: "y",
+    type: "boolean",
+    describe: "Asumsikan default & jangan tanya",
+  })
+  .option("overwrite", {
+    alias: "o",
+    type: "boolean",
+    describe: "Izinkan overwrite terkontrol (.bak dibuat)",
+  })
+  .option("dry-run", {
+    type: "boolean",
+    describe: "Tampilkan rencana tanpa menulis file",
+  })
   .option("json", { type: "boolean", describe: "Output machine-readable (CI/AI agent)" })
-  .option("no-install", { type: "boolean", describe: "Lewati pemasangan dependency otomatis" })
+  .option("no-install", {
+    type: "boolean",
+    describe: "Lewati pemasangan dependency otomatis",
+  })
   .option("preset", { type: "string", choices: ["basic", "intermediate", "advanced"] })
   .option("arch", { type: "string", choices: ["simple", "modular"] })
-  .option("orm", { type: "string", choices: ["none", "prisma", "sequelize", "mongoose", "typeorm"] })
+  .option("orm", {
+    type: "string",
+    choices: ["none", "prisma", "sequelize", "mongoose", "typeorm"],
+  })
   .option("pm", { type: "string", choices: ["npm", "pnpm", "yarn", "bun"] })
   .epilogue(
     "Integrasi-first: rakitin mendeteksi proyek existing, tidak pernah menimpa kode tanpa backup, dan semua blok router dikelola lewat marker."
@@ -120,9 +137,7 @@ const cli = yargs
 
         printResult({
           ...result,
-          created: result?.createdFiles?.map((p) =>
-            typeof p === "string" ? p : p.path
-          ),
+          created: result?.createdFiles?.map((p) => (typeof p === "string" ? p : p.path)),
           plan: ctx.dryRun ? safety.getPlan() : undefined,
         });
         safety.resetPlan();
@@ -176,27 +191,34 @@ const cli = yargs
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   })
 
-  .command("doctor", "Health-check proyek dengan rekomendasi perbaikan", {}, async (argv) => {
-    const ctx = buildContext(argv);
-    enterProjectRoot(ctx);
-    const { doctorCommand } = require("../lib/commands/info");
-    const { checks } = doctorCommand();
-    const icon = { ok: "✅", warn: "⚠️ ", fail: "❌", info: "ℹ️ " };
-    checks.forEach((c) => {
-      console.log(`${icon[c.status]} ${c.name}: ${c.detail || ""}`);
-    });
-    const failed = checks.filter((c) => c.status === "fail").length;
-    console.log(
-      `\n${failed === 0 ? "🩺 Semua check inti lulus." : `🩺 ${failed} masalah harus ditangani.`}`
-    );
-  })
+  .command(
+    "doctor",
+    "Health-check proyek dengan rekomendasi perbaikan",
+    {},
+    async (argv) => {
+      const ctx = buildContext(argv);
+      enterProjectRoot(ctx);
+      const { doctorCommand } = require("../lib/commands/info");
+      const { checks } = doctorCommand();
+      const icon = { ok: "✅", warn: "⚠️ ", fail: "❌", info: "ℹ️ " };
+      checks.forEach((c) => {
+        console.log(`${icon[c.status]} ${c.name}: ${c.detail || ""}`);
+      });
+      const failed = checks.filter((c) => c.status === "fail").length;
+      console.log(
+        `\n${failed === 0 ? "🩺 Semua check inti lulus." : `🩺 ${failed} masalah harus ditangani.`}`
+      );
+    }
+  )
 
   .command("list", "Katalog generator yang tersedia", {}, () => {
     const { listCommand } = require("../lib/commands/info");
     const { catalog } = listCommand();
     catalog.forEach((item) => {
       console.log(`• ${item.command.padEnd(28)} — ${item.desc}`);
-      console.log(`   tier: ${Array.isArray(item.tiers) ? item.tiers.join(", ") : item.tiers}`);
+      console.log(
+        `   tier: ${Array.isArray(item.tiers) ? item.tiers.join(", ") : item.tiers}`
+      );
     });
   })
 

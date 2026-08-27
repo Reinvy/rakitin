@@ -1,12 +1,12 @@
 // Global setup for Jest tests
-const os = require('os');
-const fs = require('fs-extra');
-const path = require('path');
+const os = require("os");
+const fs = require("fs-extra");
+const path = require("path");
 
 // Each test SUITE gets its OWN temporary directory inside the OS tmpdir.
 // Sharing a single directory across parallel Jest workers caused ENOENT
 // races whenever one worker wiped contents while another was scanning.
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rakitin-test-'));
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rakitin-test-"));
 global.tempDir = tempDir;
 
 // Store original console for tests that need it
@@ -52,7 +52,7 @@ afterEach(async () => {
 
   // Clear Logger instances
   try {
-    const { Logger } = require('../lib/utils/logger');
+    const { Logger } = require("../lib/utils/logger");
     Logger.clearInstances();
   } catch (e) {
     // Logger module might not be loaded yet
@@ -60,7 +60,7 @@ afterEach(async () => {
 
   // Clear PathCache
   try {
-    const utils = require('../lib/utils');
+    const utils = require("../lib/utils");
     if (utils.clearPathCache) {
       utils.clearPathCache();
     }
