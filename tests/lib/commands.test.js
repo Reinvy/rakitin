@@ -9,9 +9,15 @@ const { initCommand } = require("../../lib/commands/init");
 const { addCommand } = require("../../lib/commands/add");
 const { integrateCommand } = require("../../lib/commands/integrate");
 const { infoCommand, doctorCommand, listCommand } = require("../../lib/commands/info");
+const installer = require("../../lib/installer");
 
 beforeEach(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});
+  installer.internals.execCommand = jest.fn().mockResolvedValue({
+    success: true,
+    stdout: "",
+    stderr: "",
+  });
 });
 
 afterEach(() => {

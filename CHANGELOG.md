@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automatic Router Integration**: Configurable `autoIntegrateRouter` automatically wires newly created modules into `app/routes/index.js`.
 - **Production-Ready & Feature-Complete Auth Recipe (`recipe auth`)**: Upgraded `rakitin recipe auth` to generate a ready-to-use authentication setup with `bcryptjs` password hashing, JWT signing & verification (`auth.middleware.js`), full User models with `email` (`@unique`), `password`, `name`, `role`, and timestamps across all ORMs (Prisma 7, Sequelize, Mongoose, TypeORM, None), comprehensive Joi schemas (`registerSchema`, `loginSchema`, `updateProfileSchema`, `changePasswordSchema`), and complete endpoints (`register`, `login`, `getProfile`/`me`, `updateProfile`, `changePassword`, and sanitized user queries).
 
+### Fixed
+- **Prisma Package Auto-Installation**: Registered `@prisma/client` and `prisma` packages under `module:prisma` in `lib/deps/manifest.js` and updated installer checks, ensuring that whenever Prisma is selected (`init`, `add module --orm prisma`, `recipe auth`), `@prisma/client` and `prisma` are automatically installed if not already present in `package.json`.
+
 ## [2.0.0] - 2026-08-27
 
 Integration-first rewrite ("detect-first, never destructive") with a new

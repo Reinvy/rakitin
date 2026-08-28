@@ -37,6 +37,19 @@ afterAll(async () => {
   }
 });
 
+beforeEach(async () => {
+  try {
+    const installer = require("../lib/installer");
+    installer.internals.execCommand = jest.fn().mockResolvedValue({
+      success: true,
+      stdout: "",
+      stderr: "",
+    });
+  } catch (_) {
+    // ignore
+  }
+});
+
 // Cleanup after each test
 afterEach(async () => {
   // Clear all mocks
