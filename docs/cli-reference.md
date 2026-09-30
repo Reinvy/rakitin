@@ -7,11 +7,12 @@ existing Node.js/Express project (`engines.node >= 18`), never clobbers
 user files without a `.bak` backup, and manages main-router wiring through
 idempotent marker blocks.
 
-## 1. Synopsis & exit-code philosophy
+### 1. Synopsis & exit-code philosophy
 
 ```
-rakitin                                # bare → legacy interactive menu
-rakitin init                           # detect project + write .rakitinrc.json
+rakitin                                # bare → interactive menu
+rakitin init                           # wizard / headless init + write .rakitinrc.json
+rakitin config [get|set|list]          # view or update configuration
 rakitin add <thing> [name]             # module|middleware|util|config|endpoint|validation|docs
 rakitin recipe <name>                  # auth|swagger|test|docker
 rakitin integrate                      # marker-based router wiring
@@ -71,19 +72,19 @@ numbered `🧭 Next steps:` block.
 
 ### Which command honors what
 
-| Flag | init | add module | add mw/util/config/endp/valid/docs | recipe * | integrate |
-| --- | :-: | :-: | :-: | :-: | :-: |
-| `--cwd` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `--yes/-y` | – | ✅ skips prompts¹ | mw custom name only | – | – |
-| `--overwrite/-o` | ✅ regenerates rc | –² | –² | –² | – |
-| `--dry-run` | – (writes anyway) | ✅ | ✅ | ✅ | ✅ |
-| `--json` | ✅ | ✅³ | ✅³ | ✅ | ✅ |
-| `--no-install` | – | ✅ | mw only | –⁴ | – |
-| `--preset` | ✅ | – | – | – | – |
-| `--arch` | – | ✅ | – | `recipe auth` | – |
-| `--orm` | – | ✅ | – | – | – |
-| `--pm` | – | ✅ deps | – | auth/swagger/test installs | – |
-| `--middleware csv` | – | – | – | – | ✅ |
+| Flag | init | config | add module | add mw/util/config/endp/valid/docs | recipe * | integrate |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| `--cwd` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--yes/-y` | ✅ | ✅ | ✅ skips prompts¹ | mw custom name only | – | – |
+| `--overwrite/-o` | ✅ regenerates rc | – | –² | –² | –² | – |
+| `--dry-run` | – (writes anyway) | – | ✅ | ✅ | ✅ | ✅ |
+| `--json` | ✅ | ✅ | ✅³ | ✅³ | ✅ | ✅ |
+| `--no-install` | ✅ | – | ✅ | mw only | –⁴ | – |
+| `--preset` | ✅ | – | – | – | – | – |
+| `--arch` | ✅ | – | ✅ | – | `recipe auth` | – |
+| `--orm` | ✅ | – | ✅ | – | – | – |
+| `--pm` | ✅ | – | ✅ deps | – | auth/swagger/test installs | – |
+| `--middleware csv` | – | – | – | – | – | ✅ |
 
 ¹ Without a positional name, `--yes` is rejected (“Nama modul wajib ada”).
 ² File generation primitives are write-if-absent; existing files surface in
@@ -97,33 +98,62 @@ markers + `.bak`, not this flag). ³ Interactive flows still print prompt UI.
 
 ### 3.1 `rakitin init`
 
-Detects the project and writes `.rakitinrc.json`; idempotent without
-`--overwrite`.
+Inisialisasi proyek, scaffolding Express generator baru (opsional), setup database dasar, dan konfigurasi `.rakitinrc.json`.
 
 ```bash
 # Synopsis
-rakitin init [--preset basic|intermediate|advanced] [--overwrite] [--cwd DIR]
+rakitin init [--express] [--arch modular|simple] [--orm prisma|sequelize|mongoose|typeorm|none] \
+    [--pm npm|pnpm|yarn|bun] [--auto-integrate] [--preset basic|intermediate|advanced] \
+    [--overwrite] [--cwd DIR] [--yes] [--json]
 ```
 
 | Option | Effect |
 | --- | --- |
+| `--express` | Generate project Express baru dari awal menggunakan `npx express-generator --no-view` dan menghubungkan `app.js` ke `/api`. |
+| `--arch` | Set arsitektur proyek default (`modular` atau `simple`). |
+| `--orm` | Set ORM/Database proyek default (`prisma`, `sequelize`, `mongoose`, `typeorm`, `none`). |
+| `--pm` | Set package manager yang digunakan (`npm`, `pnpm`, `yarn`, `bun`). |
+| `--auto-integrate` | Aktifkan integrasi otomatis modul baru ke `app/routes/index.js` (default: `true`). |
 | `--preset` | Force preset; unknown values abort. Omitted ⇒ auto-preset: any ORM installed ⇒ `intermediate`, else `basic`. |
-| `--overwrite/-o` | Regenerate config even if present (acts as `force`). |
-| `--json` | Standard object. Dry-run not honored here. |
+| `--overwrite/-o` / `--force/-f` | Regenerasi konfigurasi dan file base meskipun sudah ada. |
+| `--json` | Standard output object JSON. |
 
-Written shape: `$schema`, `preset`, `version: 2`,
-`detected {expressVersion, packageManager, modules, mixedArchitectures}`,
-`generatedAt`. Detection trusts per-module structure, so mixed layouts are
-reported honestly (see [tiers](./integration-tiers.md#1-the-three-tiers-at-a-glance)).
+Behavior:
+* Mode Interaktif (TTY): Menampilkan wizard pemilihan project Express dari awal, arsitektur, ORM, package manager, dan router auto-integrate.
+* Mode Headless / Flags: Melewati wizard dan langsung menulis konfigurasi sesuai flags.
+* Menyiapkan base router (`app/routes/index.js`) dan database connection singleton (`app/shared/config/db.js` atau `data-source.js` / Prisma base schema).
 
 ```bash
-rakitin init                                   # auto-preset baseline
-rakitin init --preset advanced --overwrite     # explicit, regenerating
-CI=true rakitin init --preset basic --json | jq -e '.ok == true'   # CI check
-PLAN=$(rakitin init --preset intermediate --json); echo "$PLAN" | jq -r '.nextSteps[]'   # agent
+rakitin init                                                    # interactive wizard
+rakitin init --express --arch modular --orm prisma --pm npm     # express generator scaffold
+rakitin init --orm sequelize --arch simple --yes                # non-interactive headless init
+rakitin init --preset advanced --overwrite                      # explicit, regenerating
 ```
 
-### 3.2 `rakitin add module <name>`
+### 3.2 `rakitin config`
+
+Lihat atau ubah konfigurasi `.rakitinrc.json` proyek.
+
+```bash
+# Synopsis
+rakitin config [list|get|set|interactive] [key] [value] [--json]
+```
+
+| Subcommand | Usage | Description |
+| --- | --- | --- |
+| `rakitin config` / `list` | `rakitin config list` | Tampilkan seluruh konfigurasi aktif dalam format tabel atau JSON. |
+| `rakitin config get <key>` | `rakitin config get orm` | Ambil nilai konfigurasi tertentu (mendukung alias: `arch`, `pm`, dll.). |
+| `rakitin config set <key> <value>` | `rakitin config set orm mongoose` | Ubah nilai konfigurasi secara langsung di `.rakitinrc.json`. |
+
+```bash
+rakitin config list
+rakitin config get orm
+rakitin config set orm mongoose
+rakitin config set defaultArchitecture simple
+rakitin config set autoIntegrateRouter false
+```
+
+### 3.3 `rakitin add module <name>`
 
 Full feature module; headless-first, remaining decisions prompted unless
 `--yes`.
@@ -136,9 +166,9 @@ rakitin add module <name> [--arch simple|modular] \
 
 Options: `<name>` normalized to kebab-case directories (`User Profile` →
 `user-profile`) and required even under `--yes`; `--arch` default
-`modular`; `--orm` default `none`; missing flags trigger the fill-in
+`modular`; `--orm` defaults to configured project ORM or `prisma`; missing flags trigger the fill-in
 prompts keyed `moduleName` → `architecture` (Simple|Modular) → `useORM`
-(confirm, default true) → `ormChoice` (…|None).
+(confirm, default true) → `ormChoice` (Prisma|Sequelize|Mongoose|TypeORM|None).
 
 Behavior:
 
@@ -276,25 +306,23 @@ printf 'openapi-json\nCatalog API\n1.0.0\nN\n' | rakitin add docs
 
 ### 3.9 `rakitin recipe auth`
 
-Composite advanced-tier recipe: JWT middleware + user module + Joi
-validators + dependency wiring + env merge.
+Composite advanced-tier recipe: Production-ready JWT authentication with password hashing (`bcryptjs`), complete user model schema (with `email`, `password`, `name`, `role`), full auth controller/service, protected routes, and Joi validation.
 
 ```bash
-rakitin recipe auth [--arch simple|modular] [--pm npm|pnpm|yarn|bun] [--json]
+rakitin recipe auth [--arch simple|modular] [--orm prisma|sequelize|mongoose|typeorm|none] [--pm npm|pnpm|yarn|bun] [--json]
 ```
 
-Steps executed: ① `createMiddleware("auth")` →
-`app/shared/middlewares/auth.middleware.js`; ② user module generated
-(architecture follows `--arch`, default modular, ORM None) unless present;
-③ `app/shared/validators/user.validator.js` with `registerSchema`
-(email, password 8–72, optional name) and `loginSchema`; ④ installs
-`jsonwebtoken` + `joi` (keys `middleware:auth`, `validation:joi`);
-⑤ merges `JWT_SECRET=change-me-please` / `JWT_EXPIRES_IN=7d` into
-`.env.example` (missing keys only). Recipes own their installs;
-`--no-install` is not consulted.
+Steps executed:
+① `createMiddleware("auth")` → `app/shared/middlewares/auth.middleware.js` (JWT token verification, attaching `req.user` & `req.credentials`);
+② User module generated with auth-ready controller and service (`register`, `login`, `getProfile`, `updateProfile`, `changePassword`, and sanitized user queries) for the chosen architecture (`modular` / `simple`);
+③ Complete User model generated for the active ORM (`prisma/schema/user.prisma`, Sequelize/Mongoose `user.model.js`, TypeORM `user.entity.js`, or in-memory store) containing `email` (unique), `password`, `name`, `role`, and timestamps;
+④ `app/shared/validators/user.validator.js` with `registerSchema`, `loginSchema`, `updateProfileSchema`, and `changePasswordSchema`;
+⑤ Installs `jsonwebtoken`, `joi`, and `bcryptjs` (keys `recipe:auth`, plus ORM driver if active);
+⑥ Merges `JWT_SECRET=change-me-please` / `JWT_EXPIRES_IN=7d` (and `DATABASE_URL` for Prisma) into `.env.example`.
 
 ```bash
-rakitin recipe auth --arch simple                    # flat user module
+rakitin recipe auth --arch modular --orm prisma      # full Prisma 7 JWT auth
+rakitin recipe auth --arch simple --orm sequelize    # flat Sequelize auth module
 J=$(rakitin recipe auth --json)
 grep -F 'JWT_EXPIRES_IN=7d' .env.example && jq -e '.ok' <<<"$J"
 jq -e 'any(.created[]; contains("validators/user.validator.js"))' <<<"$J"   # CI assertion

@@ -191,7 +191,14 @@ describe("Dependency Manifest", () => {
   });
 
   test("ormToKind bridges ORM display names", () => {
+    expect(manifest.ormToKind("Prisma")).toBe("module:prisma");
     expect(manifest.ormToKind("Mongoose")).toBe("module:mongoose");
     expect(manifest.ormToKind("Unknown")).toBe("module:none");
+  });
+
+  test("resolves prisma packages for module:prisma kind", () => {
+    const { packages } = manifest.resolvePackagesForKinds(["module:prisma"]);
+    expect(packages).toContain("@prisma/client");
+    expect(packages).toContain("prisma");
   });
 });

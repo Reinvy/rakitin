@@ -15,7 +15,7 @@ const DIST_CJS = "dist/cjs";
 const DIST_ESM = "dist/esm";
 
 // Files to include in bundle
-const ENTRY_POINTS = {
+const _ENTRY_POINTS = {
   "index.js": "index.js",
   "bin/rakitin.js": "bin/rakitin.js",
 };

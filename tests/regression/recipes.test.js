@@ -52,6 +52,8 @@ describe("auth recipe", () => {
     ).toBe(true);
     // user module
     expect(fs.existsSync(path.join(global.tempDir, "app/modules/user"))).toBe(true);
+    expect(fs.existsSync(path.join(global.tempDir, "prisma/schema/user.prisma"))).toBe(true);
+    expect(fs.existsSync(path.join(global.tempDir, "app/shared/config/db.js"))).toBe(true);
     // joi validator parses standalone
     const validatorPath = path.join(
       global.tempDir,

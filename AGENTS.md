@@ -18,6 +18,7 @@ to work safely inside this repository. Human contributors benefit too.
 ```bash
 npm install            # setup
 npm test               # full Jest suite (~320 tests, must stay green)
+npm run test:real-project # full E2E test on real project in tests/project/
 npx jest tests/regression -t "<name>"   # run a single regression guard
 npm run lint           # eslint (flat config)
 npm run typecheck      # tsc --noEmit over types/

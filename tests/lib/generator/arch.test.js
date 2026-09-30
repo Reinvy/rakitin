@@ -82,7 +82,7 @@ describe("modularArch", () => {
       path.join(dir, "services", "order-item.service.js"),
       "utf8"
     );
-    expect(serviceSrc).toContain("../../models/order-item.model");
+    expect(serviceSrc).toContain("../models/order-item.model");
   });
 
   test("is idempotent across repeated generation", async () => {

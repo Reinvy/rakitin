@@ -102,6 +102,7 @@ export interface RakitinConfig {
   // Architecture defaults
   defaultArchitecture: ArchitectureType;
   defaultORM: ORMType;
+  orm?: string;
 
   // Router settings
   autoIntegrateRouter: boolean;
@@ -156,9 +157,28 @@ export interface ConfigSchema {
  */
 export interface SpinnerOptions {
   message?: string;
+  text?: string;
   color?: 'red' | 'green' | 'yellow' | 'blue' | 'cyan' | 'white' | 'dim';
   frames?: string[];
   interval?: number;
+}
+
+export declare class Spinner {
+  constructor(options?: string | SpinnerOptions);
+  message: string;
+  text: string;
+  color: string;
+  frames: string[];
+  interval: number;
+  start(message?: string): this;
+  stop(finalMessage?: string, success?: boolean): this;
+  succeed(message?: string): this;
+  fail(message?: string): this;
+  warn(message?: string): this;
+  info(message?: string): this;
+  setMessage(message: string): this;
+  setColor(color: string): this;
+  isSpinning(): boolean;
 }
 
 /**
@@ -175,6 +195,26 @@ export interface ProgressBarOptions {
   suffix?: string;
   color?: 'red' | 'green' | 'yellow' | 'blue' | 'cyan' | 'white';
   completeColor?: 'red' | 'green' | 'yellow' | 'blue' | 'cyan' | 'white';
+}
+
+export declare class ProgressBar {
+  constructor(options?: ProgressBarOptions);
+  total: number;
+  current: number;
+  width: number;
+  showPercentage: boolean;
+  showLabel: boolean;
+  label: string;
+  prefix: string;
+  suffix: string;
+  color: string;
+  completeColor: string;
+  toString(): string;
+  render(): void;
+  update(current: number, label?: string | null): void;
+  increment(amount?: number, label?: string | null): void;
+  complete(message?: string): void;
+  reset(): void;
 }
 
 /**
@@ -199,6 +239,22 @@ export interface Step {
   name: string;
   status: StepStatus;
   message: string;
+}
+
+export declare class StepProgress {
+  constructor(steps?: string[], options?: StepProgressOptions);
+  steps: Step[];
+  currentStepIndex: number;
+  showNumbers: boolean;
+  showIcons: boolean;
+  indentation: number;
+  start(stepId: number | string, message?: string): this;
+  complete(message?: string): this;
+  error(message?: string): this;
+  reset(): void;
+  getCurrentStep(): Step | null;
+  getSteps(): Step[];
+  isComplete(): boolean;
 }
 
 // ============================================================================

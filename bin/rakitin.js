@@ -79,8 +79,29 @@ const cli = yargs
   /* init ------------------------------------------------------------- */
   .command(
     "init",
-    "Deteksi proyek & tulis konfigurasi .rakitinrc.json",
-    {},
+    "Inisialisasi proyek & konfigurasi .rakitinrc.json",
+    {
+      express: {
+        type: "boolean",
+        describe: "Generate project Express baru dengan express-generator --no-view",
+      },
+      preset: { type: "string", choices: ["basic", "intermediate", "advanced"] },
+      orm: {
+        type: "string",
+        choices: ["prisma", "sequelize", "mongoose", "typeorm", "none"],
+      },
+      arch: { type: "string", choices: ["simple", "modular"] },
+      pm: { type: "string", choices: ["npm", "pnpm", "yarn", "bun"] },
+      autoIntegrate: {
+        type: "boolean",
+        describe: "Otomatis integrasikan modul ke router utama",
+      },
+      force: {
+        type: "boolean",
+        alias: "f",
+        describe: "Regenerasi konfigurasi meskipun sudah ada",
+      },
+    },
     async (argv) => {
       const ctx = buildContext(argv);
       enterProjectRoot(ctx);
@@ -88,18 +109,61 @@ const cli = yargs
       try {
         const { initCommand } = require("../lib/commands/init");
         const result = await initCommand({
-          preset: argv.preset,
-          force: Boolean(ctx.overwrite),
+          preset: argv.preset || ctx.preset,
+          orm: argv.orm || (ctx.ormExplicit ? ctx.orm : undefined),
+          arch: argv.arch || (argv.architecture ? argv.architecture : undefined),
+          pm: argv.pm || ctx.pm,
+          express: argv.express !== undefined ? argv.express : ctx.express,
+          autoIntegrate:
+            argv.autoIntegrate !== undefined
+              ? argv.autoIntegrate
+              : argv["auto-integrate"] !== undefined
+                ? argv["auto-integrate"]
+                : undefined,
+          force: Boolean(ctx.overwrite || argv.force || argv.f),
+          yes: ctx.yes,
+          json: ctx.json,
+          install: ctx.install,
         });
         printResult({
           created: result.created ? [result.configFile] : [],
           skipped: result.created ? [] : [result.configFile],
-          nextSteps: [
+          nextSteps: result.nextSteps || [
             result.created
-              ? `Preset aktif: ${result.preset}`
-              : `Konfigurasi sudah ada (preset: ${result.preset})`,
+              ? `Preset aktif: ${result.preset} (ORM: ${result.orm})`
+              : `Konfigurasi sudah ada (preset: ${result.preset}, ORM: ${result.orm})`,
             "Jalankan: rakitin doctor untuk health-check",
           ],
+        });
+      } catch (err) {
+        fail(err, ctx.json);
+      }
+    }
+  )
+
+  /* config [action] [key] [value] ------------------------------------- */
+  .command(
+    "config [action] [key] [value]",
+    "Lihat atau ubah konfigurasi .rakitinrc.json (list|get|set)",
+    {
+      action: {
+        type: "string",
+        choices: ["get", "set", "list", "interactive"],
+        default: "list",
+      },
+      key: { type: "string", describe: "Kunci konfigurasi (misal: orm, arch, autoIntegrateRouter)" },
+      value: { type: "string", describe: "Nilai konfigurasi baru (untuk aksi set)" },
+    },
+    async (argv) => {
+      const ctx = buildContext(argv);
+      enterProjectRoot(ctx);
+      if (ctx.json) enableJsonMode();
+      try {
+        const { configCommand } = require("../lib/commands/config");
+        await configCommand(argv.action, argv.key, argv.value, {
+          json: ctx.json,
+          cwd: ctx.cwd,
+          yes: ctx.yes,
         });
       } catch (err) {
         fail(err, ctx.json);
@@ -132,6 +196,7 @@ const cli = yargs
         const { recipeCommand } = require("../lib/commands/recipe");
         const result = await recipeCommand(argv.name, {
           arch: ctx.arch,
+          orm: ctx.orm,
           pm: ctx.pm,
         });
 
@@ -260,11 +325,15 @@ async function runAdd(argv) {
     if (argv.thing === "util") {
       const utilModule = require("../lib/generator/util/util");
       const generateUtil = utilModule.generateUtil || utilModule;
-      result = (await generateUtil()) || {};
+      result = (await generateUtil(argv.name)) || {};
     } else if (argv.thing === "recipe") {
       // Convenience alias: rakitin add recipe <name>
       const { recipeCommand } = require("../lib/commands/recipe");
-      result = await recipeCommand(argv.name, { arch: ctx.arch, pm: ctx.pm });
+      result = await recipeCommand(argv.name, {
+        arch: ctx.arch,
+        orm: ctx.orm,
+        pm: ctx.pm,
+      });
     } else {
       const { addCommand } = require("../lib/commands/add");
       result = await addCommand(argv.thing, argv.name, ctx);
@@ -282,10 +351,6 @@ async function runAdd(argv) {
     safety.resetPlan();
     fail(err, ctx.json);
   }
-}
-
-function runLegacyGenerator(fn) {
-  return fn();
 }
 
 function banner() {

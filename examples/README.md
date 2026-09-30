@@ -27,8 +27,7 @@ marker-managed (`app/routes/index.js`).
 
 ## intermediate-prisma-modular
 
-Prerequisite: a minimal `prisma/schema.prisma` existed before generating
-(client + sqlite datasource blocks only).
+Prerequisite: Prisma 7 multi-file schema (`prisma/schema/base.prisma` datasource and generator).
 
 ```bash
 rakitin add module products --arch modular --orm prisma --no-install --yes
@@ -38,8 +37,8 @@ rakitin integrate
 
 Note the interesting bits after generation:
 
-* `prisma/schema.prisma` now contains the appended `model Products` block,
-  so the Prisma CLI actually consumes it.
+* `prisma/schema/products.prisma` is generated directly inside the Prisma 7 schema folder,
+  allowing direct migration and schema editing per module without duplication.
 * `app/shared/config/db.js` is the generated Prisma client singleton.
 * Service/controller require chains use consistent kebab-case file names.
 

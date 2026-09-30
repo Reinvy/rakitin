@@ -1,0 +1,10 @@
+{
+  "name": "test-real-project",
+  "version": "1.0.0",
+  "description": "Clean test project for rakitin",
+  "main": "index.js",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^4.19.0"
+  }
+}
