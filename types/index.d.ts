@@ -1,59 +1,251 @@
 /**
- * TypeScript Definitions for rakitin library
- * Strict mode enabled for maximum type safety
+ * TypeScript definitions for rakitin (v3).
+ *
+ * This file is the `types` entry for the package root AND for every
+ * `exports` subpath (`rakitin/config`, `rakitin/naming`, `rakitin/safety`,
+ * `rakitin/utils`, `rakitin/utils/logger`, `rakitin/ui`,
+ * `rakitin/ui/progress`, `rakitin/template`, `rakitin/template/engine`),
+ * so it declares the complete runtime surface in one place.
  */
 
 // ============================================================================
-// CORE TYPES
+// SHARED TYPES
 // ============================================================================
 
-/**
- * Supported ORM types
- */
-export type ORMType = 'Prisma' | 'Sequelize' | 'Mongoose' | 'TypeORM' | 'None';
+export type ORMName = "none" | "prisma" | "sequelize" | "mongoose" | "typeorm";
+export type Architecture = "simple" | "modular";
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+export type Preset = "basic" | "intermediate" | "advanced";
+export type ModuleTemplate = "crud" | "readonly" | "graphql" | "realtime";
+export type LogLevel = "debug" | "info" | "warn" | "error" | "success" | "silent";
+export type NameKind =
+  | "module"
+  | "middleware"
+  | "config"
+  | "util"
+  | "resource"
+  | "validator"
+  | "plugin";
 
-/**
- * Supported architectures
- */
-export type ArchitectureType = 'Simple' | 'Modular';
+/** One entry of a `--dry-run` plan. */
+export interface PlanEntry {
+  op: "create" | "overwrite" | "mkdir" | "install";
+  path: string;
+  backup?: string | null;
+}
 
-/**
- * Supported package managers
- */
-export type PackageManager = 'npm' | 'pnpm' | 'yarn';
+/** Verdict of `writeFileIfNotExistsSafe`. */
+export interface WriteVerdict {
+  written: boolean;
+  skipped: "exists" | null;
+}
 
-/**
- * Supported log levels
- */
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
+/** Verdict of `overwriteWithBackup`. */
+export interface OverwriteVerdict {
+  written: boolean;
+  backedUp: boolean;
+  backupPath: string | null;
+}
 
-/**
- * Installation result
- */
+/** Verdict of `updateJsonFile`. */
+export interface JsonUpdateVerdict extends OverwriteVerdict {
+  skipped: "unchanged" | null;
+  value: Record<string, unknown>;
+}
+
+/** Verdict of `mergeEnvExample`. */
+export interface EnvMergeVerdict {
+  written: boolean;
+  skipped: "marker-exists" | null;
+  path: string;
+}
+
+/** What every generator returns. */
+export interface GenerateResult {
+  created: string[];
+  skipped: string[];
+  data?: Record<string, unknown>;
+  nextSteps?: string[];
+}
+
+/** The unified result envelope printed by every command. */
+export interface ResultEnvelope {
+  ok: boolean;
+  created: string[];
+  skipped: string[];
+  plan?: PlanEntry[];
+  nextSteps: string[];
+  message?: string;
+  data?: unknown;
+  error?: string;
+}
+
+/** Verdict of the dependency installer. */
 export interface InstallResult {
   success: boolean;
   installed: string[];
+  skipped: string[];
   failed: string[];
 }
 
-/**
- * Validation result
- */
-export interface ValidationResult {
-  isValid: boolean;
-  message: string;
-  errors?: string[];
+/** A child process invocation spec - never a shell string. */
+export interface CommandSpec {
+  command: string;
+  args: string[];
+}
+
+/** Normalized CLI context built from yargs argv. */
+export interface RakitinContext {
+  root: string;
+  json: boolean;
+  yes: boolean;
+  overwrite: boolean;
+  dryRun: boolean;
+  install: boolean;
+  pm: PackageManager | null;
+  preset: Preset;
+  arch: Architecture;
+  orm: ORMName;
+  ormExplicit: boolean;
+  generateValidationLayer: boolean;
+  generateTestFiles: boolean;
+  express?: boolean;
+  force: boolean;
+  autoIntegrateRouter: boolean;
+  name: string | null;
+  module: string | null;
+  kind: string | null;
+  customName: string | null;
+  resource: string | null;
+  fields: string | null;
+  fromModule: string | null;
+  common: boolean;
+  all: boolean;
+  template: string;
+  withTests: boolean;
+  title: string | null;
+  apiVersion: string | null;
+  auth?: boolean;
+  pagination: boolean;
+  filtering: boolean;
+  wsPath: string;
+  middleware: string | string[] | null;
+  spec: string | null;
+  configValues: Record<string, unknown>;
+}
+
+/** Conventional project paths for a root. */
+export interface ProjectPaths {
+  root: string;
+  basePath: string;
+  modulesPath: string;
+  sharedPath: string;
+  appRoutesPath: string;
+  docsPath: string;
+  prismaPath: string;
 }
 
 // ============================================================================
-// LOGGER TYPES
+// NAMING
 // ============================================================================
 
-/**
- * Logger configuration
- */
-export interface LoggerConfig {
-  level?: LogLevel;
+export function toPascalCase(str: string): string;
+export function toCamelCase(str: string): string;
+export function toKebabCase(str: string): string;
+export function toSnakeCase(str: string): string;
+export function toTitleCase(str: string): string;
+export function toConstantCase(str: string): string;
+export function normalizeModuleName(moduleName: string): string;
+export function toIdentifier(str: string, options?: { casing?: "camel" | "pascal" }): string;
+export function toSafeFileName(str: string): string;
+export function assertSafeName(kind: NameKind, raw: string): string;
+export function sanitizeFieldName(raw: string): string;
+export function toFieldIdentifier(raw: string): string;
+export function clearNamingCaches(): void;
+export const RESERVED_WORDS: Set<string>;
+export interface ModuleVariants {
+  raw: string;
+  kebab: string;
+  pascal: string;
+  camel: string;
+  snake: string;
+  constant: string;
+  identifier: string;
+}
+export function getModuleVariants(moduleName: string): ModuleVariants;
+
+// ============================================================================
+// SAFETY
+// ============================================================================
+
+export function setDryRun(enabled: boolean): void;
+export function isDryRun(): boolean;
+export function setOverwrite(enabled: boolean): void;
+export function isOverwrite(): boolean;
+export function beginPlan(): void;
+export function resetPlan(): void;
+export function getPlan(): PlanEntry[];
+export function backupPathFor(filePath: string): string;
+export function writeFileIfNotExistsSafe(
+  filePath: string,
+  content?: string,
+  overrides?: { dryRun?: boolean }
+): WriteVerdict;
+export function overwriteWithBackup(
+  filePath: string,
+  content: string,
+  overrides?: { dryRun?: boolean }
+): OverwriteVerdict;
+export function writeOutcome(result: WriteVerdict): "created" | "skipped";
+export function updateJsonFile(
+  filePath: string,
+  mutator: (obj: Record<string, unknown>) => Record<string, unknown> | false,
+  overrides?: { dryRun?: boolean }
+): JsonUpdateVerdict;
+export function mergeEnvExample(
+  root: string,
+  marker: string,
+  content: string,
+  overrides?: { dryRun?: boolean }
+): EnvMergeVerdict;
+export function buildMarkedBlock(options: {
+  existing: string | null;
+  startToken: string;
+  endToken: string;
+  inner?: string;
+  header?: string;
+  eofFallback?: string;
+  commentPrefix?: string;
+}): { content: string; action: "create" | "inject" | "append" };
+export function buildRoutesContent(
+  existing: string | null,
+  routeLines: string
+): { content: string; action: "create" | "inject" | "append" };
+export const runtime: { dryRun: boolean; plan: PlanEntry[] };
+export const ROUTES_BLOCK_START: string;
+export const ROUTES_BLOCK_END: string;
+export const RESOURCE_BLOCK_START: string;
+export const RESOURCE_BLOCK_END: string;
+export const GRAPHQL_BLOCK_START: string;
+export const GRAPHQL_BLOCK_END: string;
+export const WS_BLOCK_START: string;
+export const WS_BLOCK_END: string;
+export const MAIN_ROUTER_HEADER: string;
+
+// ============================================================================
+// UTILS
+// ============================================================================
+
+export function ensureDir(dir: string): void;
+export function writeFileIfNotExists(filePath: string, content?: string): boolean;
+export function relativePosix(root: string, target: string): string;
+
+// ============================================================================
+// LOGGER
+// ============================================================================
+
+export interface LoggerOptions {
+  level?: LogLevel | number;
   enableColors?: boolean;
   enableTimestamp?: boolean;
   enableFileLogging?: boolean;
@@ -61,457 +253,371 @@ export interface LoggerConfig {
   prefix?: string;
 }
 
-/**
- * Log levels enum
- */
-export enum LogLevels {
-  DEBUG = 0,
-  INFO = 1,
-  WARN = 2,
-  ERROR = 3,
-  SILENT = 4,
-}
-
-/**
- * Logger interface
- */
-export interface ILogger {
+export class Logger {
+  constructor(config?: LoggerOptions);
+  config: LoggerOptions;
   debug(...args: unknown[]): void;
   info(...args: unknown[]): void;
   warn(...args: unknown[]): void;
   error(...args: unknown[]): void;
   success(...args: unknown[]): void;
+  child(prefix: string): Logger;
   setLevel(level: LogLevel | number): void;
-  child(prefix: string): ILogger;
+  setColors(enabled: boolean): void;
+  setTimestamp(enabled: boolean): void;
+  enableFileLogging(filePath?: string): void;
+  disableFileLogging(): void;
+  static getInstance(name?: string, config?: LoggerOptions): Logger;
+  static clearInstances(): void;
 }
+export const LOG_LEVELS: Record<string, number>;
+export const SYMBOLS: Record<string, string>;
+export const COLORS: Record<string, string>;
+export function createLogger(config?: LoggerOptions): Logger;
 
 // ============================================================================
-// CONFIG TYPES
+// UI
 // ============================================================================
 
-/**
- * Default configuration structure
- */
+export class Spinner {
+  constructor(options?: { text?: string; frames?: string[]; interval?: number });
+  start(text?: string): this;
+  stop(): this;
+  succeed(text?: string): this;
+  fail(text?: string): this;
+  update(text: string): this;
+}
+export class ProgressBar {
+  constructor(options?: { total?: number; width?: number; text?: string });
+  start(): this;
+  update(value: number, text?: string): this;
+  increment(step?: number, text?: string): this;
+  finish(text?: string): this;
+}
+export class StepProgress {
+  constructor(options?: { steps?: string[]; text?: string });
+  start(): this;
+  next(text?: string): this;
+  finish(): this;
+}
+export function createSpinner(options?: { text?: string }): Spinner;
+export function createProgressBar(options?: { total?: number }): ProgressBar;
+export function createStepProgress(options?: { steps?: string[] }): StepProgress;
+export const SPINNER_FRAMES: string[];
+export const CHECKMARK: string;
+export const CROSS: string;
+export const ARROW: string;
+
+// ============================================================================
+// TEMPLATE ENGINE
+// ============================================================================
+
+export class TemplateEngine {
+  constructor(options?: {
+    enableCache?: boolean;
+    locals?: Record<string, unknown>;
+    ejsOptions?: Record<string, unknown>;
+  });
+  cacheSize: number;
+  render(template: string, data?: Record<string, unknown>): string;
+  renderFile(filePath: string, data?: Record<string, unknown>): string;
+  clearCache(): void;
+}
+export function renderTemplate(template: string, data?: Record<string, unknown>): string;
+export const defaultEngine: TemplateEngine;
+
+// ============================================================================
+// CONFIG
+// ============================================================================
+
 export interface RakitinConfig {
-  // Project structure
-  basePath: string;
-  modulesPath: string;
-  sharedPath: string;
-  routesPath: string;
-
-  // Architecture defaults
-  defaultArchitecture: ArchitectureType;
-  defaultORM: ORMType;
-  orm?: string;
-
-  // Router settings
+  version: number;
+  preset: Preset | null;
+  arch: Architecture | null;
+  orm: ORMName | null;
+  packageManager: PackageManager | null;
   autoIntegrateRouter: boolean;
-  defaultRouterArchitecture: 'modular' | 'simple';
-
-  // ORM packages
-  ormPackages: Record<string, string[]>;
-
-  // Logging
-  logLevel: LogLevel;
-  enableFileLogging: boolean;
-  logFilePath: string;
-
-  // UI settings
-  enableColors: boolean;
-  enableEmoji: boolean;
-  verbose: boolean;
-
-  // Package manager
-  packageManager: PackageManager;
-
-  // Generation options
-  generateServiceLayer: boolean;
   generateValidationLayer: boolean;
   generateTestFiles: boolean;
-
-  // Template settings
-  templateEngine: 'ejs' | 'custom';
-  includeComments: boolean;
-  includeJSDoc: boolean;
+  plugins: string[];
 }
 
-/**
- * Config validation schema
- */
-export interface ConfigSchema {
-  [key: string]: {
-    required?: boolean;
-    type?: 'string' | 'number' | 'boolean' | 'object' | 'array';
-    enum?: unknown[];
-    min?: number;
-    max?: number;
+export class Config {
+  constructor(initialConfig?: Partial<RakitinConfig>);
+  load(root?: string): this;
+  reload(root?: string): this;
+  reset(): this;
+  get<T = unknown>(key: string, defaultValue?: T): T;
+  set(key: string, value: unknown): this;
+  has(key: string): boolean;
+  hasExplicit(key: string): boolean;
+  explicitKeys(): string[];
+  all(): RakitinConfig & Record<string, unknown>;
+  toJSON(): RakitinConfig & Record<string, unknown>;
+  getSources(): Array<{ source: string; timestamp: string }>;
+  child(prefix: string): Config;
+  validate(schema: Record<string, { required?: boolean; type?: string; enum?: unknown[] }>): {
+    valid: boolean;
+    errors: string[];
   };
 }
+export function createConfig(initialConfig?: Partial<RakitinConfig>): Config;
+export const DEFAULT_CONFIG: RakitinConfig;
+export const CONFIG_FILES: string[];
+export const CONFIG_KEYS: string[];
+export const PRESETS: Preset[];
 
 // ============================================================================
-// PROGRESS UI TYPES
+// PROJECT DETECTION
 // ============================================================================
 
-/**
- * Spinner options
- */
-export interface SpinnerOptions {
-  message?: string;
-  text?: string;
-  color?: 'red' | 'green' | 'yellow' | 'blue' | 'cyan' | 'white' | 'dim';
-  frames?: string[];
-  interval?: number;
-}
-
-export declare class Spinner {
-  constructor(options?: string | SpinnerOptions);
-  message: string;
-  text: string;
-  color: string;
-  frames: string[];
-  interval: number;
-  start(message?: string): this;
-  stop(finalMessage?: string, success?: boolean): this;
-  succeed(message?: string): this;
-  fail(message?: string): this;
-  warn(message?: string): this;
-  info(message?: string): this;
-  setMessage(message: string): this;
-  setColor(color: string): this;
-  isSpinning(): boolean;
-}
-
-/**
- * Progress bar options
- */
-export interface ProgressBarOptions {
-  total?: number;
-  current?: number;
-  width?: number;
-  showPercentage?: boolean;
-  showLabel?: boolean;
-  label?: string;
-  prefix?: string;
-  suffix?: string;
-  color?: 'red' | 'green' | 'yellow' | 'blue' | 'cyan' | 'white';
-  completeColor?: 'red' | 'green' | 'yellow' | 'blue' | 'cyan' | 'white';
-}
-
-export declare class ProgressBar {
-  constructor(options?: ProgressBarOptions);
-  total: number;
-  current: number;
-  width: number;
-  showPercentage: boolean;
-  showLabel: boolean;
-  label: string;
-  prefix: string;
-  suffix: string;
-  color: string;
-  completeColor: string;
-  toString(): string;
-  render(): void;
-  update(current: number, label?: string | null): void;
-  increment(amount?: number, label?: string | null): void;
-  complete(message?: string): void;
-  reset(): void;
-}
-
-/**
- * Step progress options
- */
-export interface StepProgressOptions {
-  showNumbers?: boolean;
-  showIcons?: boolean;
-  indentation?: number;
-}
-
-/**
- * Step status
- */
-export type StepStatus = 'pending' | 'active' | 'complete' | 'error';
-
-/**
- * Step definition
- */
-export interface Step {
-  id: number;
+export interface ModuleInfo {
+  dirName: string;
   name: string;
-  status: StepStatus;
-  message: string;
+  architecture: Architecture | null;
 }
-
-export declare class StepProgress {
-  constructor(steps?: string[], options?: StepProgressOptions);
-  steps: Step[];
-  currentStepIndex: number;
-  showNumbers: boolean;
-  showIcons: boolean;
-  indentation: number;
-  start(stepId: number | string, message?: string): this;
-  complete(message?: string): this;
-  error(message?: string): this;
-  reset(): void;
-  getCurrentStep(): Step | null;
-  getSteps(): Step[];
-  isComplete(): boolean;
+export interface DetectedProject {
+  root: string;
+  detectedAt: string;
+  isNpmProject: boolean;
+  packageName: string | null;
+  nodeEngine: string | null;
+  hasExpress: boolean;
+  expressVersion: string | null;
+  packageManager: PackageManager | null;
+  dependencies: Record<string, string>;
+  ormsInstalled: Record<string, boolean>;
+  structure: {
+    hasAppBase: boolean;
+    modulesDirExists: boolean;
+    modules: ModuleInfo[];
+    modularCount: number;
+    simpleCount: number;
+    mixedArchitectures: boolean;
+    hasMainRouter: boolean;
+    routerPath: string;
+    routerHasMarkers: boolean;
+    availableMiddlewares: string[];
+  };
+  config: {
+    file: string | null;
+    preset: string | null;
+    orm: string | null;
+    defaultArchitecture: string | null;
+  };
 }
+export function detectProject(root?: string): DetectedProject;
+export function readPackageJson(root: string): Record<string, unknown> | null;
 
 // ============================================================================
-// TEMPLATE ENGINE TYPES
+// DEPENDENCY MANIFEST
 // ============================================================================
 
-/**
- * Template delimiters
- */
-export interface TemplateDelimiters {
-  interpolate: string;
-  evaluate: string;
-  escape: string;
-}
-
-/**
- * Template engine options
- */
-export interface TemplateEngineOptions {
-  delimiters?: Partial<TemplateDelimiters>;
-  helpers?: Record<string, (...args: unknown[]) => unknown>;
-  enableCache?: boolean;
-}
-
-/**
- * Template helper function type
- */
-export type TemplateHelper = (...args: unknown[]) => unknown;
+export const KIND_DEPENDENCIES: Record<string, string[]>;
+export const DEV_KINDS: Set<string>;
+export const ORM_KINDS: Record<string, string>;
+export function resolvePackagesForKinds(
+  kinds: string[],
+  extraKinds?: Record<string, string[]>
+): { packages: string[]; devPackages: string[]; unknownKinds: string[] };
+export function ensureDependencies(
+  kinds?: string[],
+  options?: {
+    pm?: PackageManager;
+    install?: boolean;
+    dev?: boolean;
+    silent?: boolean;
+    extraKinds?: Record<string, string[]>;
+    root?: string;
+  }
+): Promise<InstallResult>;
+export function ormToKind(orm: string): string;
 
 // ============================================================================
-// PATH RESOLVER TYPES
+// PLUGINS
 // ============================================================================
 
-/**
- * Path resolver interface
- */
-export interface IPathResolver {
-  getModularRouterPath(moduleName: string, basePath: string): string;
-  getSimpleRouterPath(moduleName: string, basePath: string): string;
-  getSimpleControllerPath(moduleName: string, basePath: string): string;
-  getModularControllerPath(moduleName: string, basePath: string): string;
-  getModularRouterImportPath(moduleName: string): string;
-  getSimpleControllerImportPath(moduleName: string): string;
-  normalizeModuleName(moduleName: string): string;
-  ensureDirectoryExists(filePath: string): void;
-  getModulePath(moduleName: string, basePath: string): string;
-  isValidPath(filePath: string): boolean;
-}
-
-// ============================================================================
-// FILE VALIDATOR TYPES
-// ============================================================================
-
-/**
- * File validation result
- */
-export interface FileValidationResult {
-  isValid: boolean;
-  path: string | null;
-  error?: string;
-}
-
-/**
- * Router integration validation result
- */
-export interface RouterIntegrationValidation {
-  isValid: boolean;
-  errors: string[];
-}
-
-// ============================================================================
-// ERROR HANDLER TYPES
-// ============================================================================
-
-/**
- * Error types
- */
-export enum ErrorTypes {
-  FILE_NOT_FOUND = 'FILE_NOT_FOUND',
-  INVALID_PATH = 'INVALID_PATH',
-  MODULE_VALIDATION = 'MODULE_VALIDATION',
-  ROUTER_INTEGRATION = 'ROUTER_INTEGRATION',
-  FILE_CREATION = 'FILE_CREATION',
-  DIRECTORY_CREATION = 'DIRECTORY_CREATION',
-  IMPORT_ERROR = 'IMPORT_ERROR',
-  VALIDATION_ERROR = 'VALIDATION_ERROR',
-  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
-}
-
-/**
- * Error info structure
- */
-export interface ErrorInfo {
-  type: ErrorTypes;
-  message: string;
-  context: string;
-  stack?: string;
-  details: Record<string, unknown>;
-  timestamp: string;
-}
-
-// ============================================================================
-// UTILITY TYPES
-// ============================================================================
-
-/**
- * Path cache interface
- */
-export interface IPathCache {
-  get(key: string): string | undefined;
-  set(key: string, value: string): void;
-  has(key: string): boolean;
-  clear(): void;
-  size: number;
-}
-
-/**
- * Installation options
- */
-export interface InstallOptions {
-  isDev?: boolean;
-  silent?: boolean;
-  packageManager?: PackageManager;
-  retry?: boolean;
-}
-
-/**
- * Retry configuration
- */
-export interface RetryConfig {
-  maxRetries: number;
-  baseDelay: number;
-  maxDelay: number;
-  backoffMultiplier: number;
-}
-
-// ============================================================================
-// MODULE GENERATION TYPES
-// ============================================================================
-
-/**
- * Module generation options
- */
-export interface ModuleGenerationOptions {
-  moduleName: string;
-  architecture: ArchitectureType;
-  useORM: boolean;
-  orm?: ORMType;
-  autoIntegrateRouter?: boolean;
-  routerArchitecture?: 'modular' | 'simple';
-}
-
-/**
- * Module structure
- */
-export interface ModuleStructure {
+export interface PluginManifest {
+  apiVersion: number;
   name: string;
-  path: string;
-  files: string[];
-  architecture: ArchitectureType;
-  orm?: ORMType;
+  version?: string;
+  description?: string;
+  generators?: Record<
+    string,
+    { describe?: string; generate: (ctx: unknown, args: unknown) => Promise<GenerateResult> }
+  >;
+  commands?: Array<{ name: string; describe?: string; handler: (argv: unknown, ctx: unknown) => Promise<unknown> }>;
+  hooks?: Record<string, (...args: unknown[]) => unknown>;
+  dependencies?: Record<string, string[]>;
 }
-
-// ============================================================================
-// CLI TYPES
-// ============================================================================
-
-/**
- * CLI command definition
- */
-export interface CLICommand {
-  name: string;
-  description: string;
-  handler: () => Promise<void>;
-  options?: Record<string, unknown>;
+export interface PluginLoadResult {
+  plugins: Array<{ entry: string; manifest: PluginManifest }>;
+  errors: Array<{ entry: string; message: string }>;
 }
-
-/**
- * CLI options
- */
-export interface CLIOptions {
-  verbose?: boolean;
-  silent?: boolean;
-  config?: string;
-}
+export function loadPlugins(options?: {
+  root?: string;
+  config?: unknown;
+  logger?: unknown;
+}): PluginLoadResult;
+export function createRegistry(plugins?: unknown[]): {
+  generators: Record<string, unknown>;
+  commands: Record<string, unknown>;
+  hooks: Record<string, unknown[]>;
+  extraKinds: Record<string, string[]>;
+};
+export function getHooks(ctx: unknown): {
+  preGenerate: Array<(ctx: unknown) => unknown>;
+  postGenerate: Array<(ctx: unknown, result: unknown) => unknown>;
+  preInstall: Array<(ctx: unknown) => unknown>;
+  postInstall: Array<(ctx: unknown, result: unknown) => unknown>;
+  onError: Array<(ctx: unknown, error: unknown) => unknown>;
+};
+export function buildPluginContext(context: unknown, pluginArgs?: unknown): unknown;
+export function getGenerators(ctx: unknown): Record<string, { describe?: string; generate: unknown }>;
+export function getExtraKinds(ctx?: unknown): Record<string, string[]>;
+export function resetPlugins(): void;
 
 // ============================================================================
-// MAIN EXPORTS
+// COMMANDS
 // ============================================================================
 
-// Logger exports
-export { Logger, LOG_LEVELS, SYMBOLS, COLORS };
-export default createLogger;
+export function buildContext(argv?: Record<string, unknown>): RakitinContext;
+export function enterProjectRoot(context: RakitinContext): void;
+export function printResult(result: Partial<ResultEnvelope>, context?: RakitinContext | null): void;
+export function printFailure(error: unknown, json?: boolean): void;
+export function isJsonMode(): boolean;
+export function enableJsonMode(): void;
+export function toProjectRelative(target: string, root: string): string;
+export function runWithPlugins(
+  context: RakitinContext,
+  pluginArgs: Record<string, unknown>,
+  fn: () => Promise<unknown>
+): Promise<unknown>;
+export function runWithPluginInstall(context: RakitinContext, fn: () => Promise<unknown>): Promise<unknown>;
+export function withSpinner<T>(label: string, fn: () => Promise<T>): Promise<T>;
 
-// Config exports
-export { Config, createConfig, defaultConfig, DEFAULT_CONFIG, CONFIG_FILES };
+export function initCommand(context?: Partial<RakitinContext>): Promise<ResultEnvelope>;
+export function addCommand(
+  thing: string,
+  name: string | undefined,
+  context?: Partial<RakitinContext>
+): Promise<ResultEnvelope>;
+export function integrateCommand(options?: {
+  middleware?: string | string[] | null;
+  root?: string;
+}): Promise<ResultEnvelope>;
+export function recipeCommand(name: string, context?: Partial<RakitinContext>): Promise<ResultEnvelope>;
+export function configCommand(
+  argv: Record<string, unknown>,
+  context?: Partial<RakitinContext>
+): Promise<ResultEnvelope>;
+export function infoCommand(context?: Partial<RakitinContext>): ResultEnvelope;
+export function bareSummary(context?: Partial<RakitinContext>): ResultEnvelope;
+export function doctorCommand(context?: Partial<RakitinContext>): Promise<ResultEnvelope>;
+export function listCommand(context?: Partial<RakitinContext>): ResultEnvelope;
+export function pluginCommand(
+  action: string,
+  spec: string | undefined,
+  context?: Partial<RakitinContext>
+): Promise<ResultEnvelope>;
 
-// Progress UI exports
-export { Spinner, ProgressBar, StepProgress };
-export { createSpinner, createProgressBar, createStepProgress };
+// ============================================================================
+// PACKAGE ROOT (lib/index.js)
+// ============================================================================
 
-// Template engine exports
-export { TemplateEngine, createEngine, engine, HELPERS, DEFAULT_DELIMITERS };
+export const version: string;
+export const bareSummary: (context?: Partial<RakitinContext>) => ResultEnvelope;
 
-// Utility exports
-export {
-  ensureDir,
-  writeFileIfNotExists,
-  ensureBaseStructure,
-  toPascalCase,
-  toKebabCase,
-  toCamelCase,
-  toSnakeCase,
-  toTitleCase,
-  toConstantCase,
-  normalizeModuleName,
-  getCachedModulePath,
-  clearPathCache,
-  getPathCacheSize,
-  PathCache,
+/** Naming helpers namespace (`rakitin.naming`). */
+export const naming: {
+  toPascalCase: typeof toPascalCase;
+  toCamelCase: typeof toCamelCase;
+  toKebabCase: typeof toKebabCase;
+  toSnakeCase: typeof toSnakeCase;
+  toTitleCase: typeof toTitleCase;
+  toConstantCase: typeof toConstantCase;
+  normalizeModuleName: typeof normalizeModuleName;
+  getModuleVariants: typeof getModuleVariants;
+  toIdentifier: typeof toIdentifier;
+  toSafeFileName: typeof toSafeFileName;
+  assertSafeName: typeof assertSafeName;
+  sanitizeFieldName: typeof sanitizeFieldName;
+  toFieldIdentifier: typeof toFieldIdentifier;
+  RESERVED_WORDS: typeof RESERVED_WORDS;
+  clearNamingCaches: typeof clearNamingCaches;
 };
 
-// Installer exports
-export {
-  installIfNeeded,
-  installIfNeededSync,
-  installOrmPackages,
-  isPackageInstalled,
-  getPackageManager,
-  PACKAGE_MANAGERS,
-  DEFAULT_RETRY_CONFIG,
+/** Safety layer namespace (`rakitin.safety`). */
+export const safety: {
+  setDryRun: typeof setDryRun;
+  isDryRun: typeof isDryRun;
+  setOverwrite: typeof setOverwrite;
+  isOverwrite: typeof isOverwrite;
+  beginPlan: typeof beginPlan;
+  resetPlan: typeof resetPlan;
+  getPlan: typeof getPlan;
+  backupPathFor: typeof backupPathFor;
+  writeFileIfNotExistsSafe: typeof writeFileIfNotExistsSafe;
+  overwriteWithBackup: typeof overwriteWithBackup;
+  writeOutcome: typeof writeOutcome;
+  updateJsonFile: typeof updateJsonFile;
+  mergeEnvExample: typeof mergeEnvExample;
+  buildMarkedBlock: typeof buildMarkedBlock;
+  buildRoutesContent: typeof buildRoutesContent;
+  runtime: typeof runtime;
 };
 
-// Path resolver and file validator exports
-export { PathResolver, FileValidator };
+/** Config namespace (`rakitin.config`). */
+export const config: {
+  Config: typeof Config;
+  createConfig: typeof createConfig;
+  DEFAULT_CONFIG: typeof DEFAULT_CONFIG;
+  CONFIG_FILES: typeof CONFIG_FILES;
+  CONFIG_KEYS: typeof CONFIG_KEYS;
+  PRESETS: typeof PRESETS;
+};
 
-// Error handler exports
-export { ErrorHandler };
+/** Project detection namespace (`rakitin.project`). */
+export const project: {
+  detectProject: typeof detectProject;
+  readPackageJson: typeof readPackageJson;
+};
 
-// ============================================================================
-// FUNCTION DECLARATIONS
-// ============================================================================
+/** Dependency manifest namespace (`rakitin.deps`). */
+export const deps: {
+  KIND_DEPENDENCIES: typeof KIND_DEPENDENCIES;
+  DEV_KINDS: typeof DEV_KINDS;
+  ORM_KINDS: typeof ORM_KINDS;
+  resolvePackagesForKinds: typeof resolvePackagesForKinds;
+  ensureDependencies: typeof ensureDependencies;
+  ormToKind: typeof ormToKind;
+};
 
-// Logger factory
-declare function createLogger(config?: LoggerConfig): ILogger;
+/** Command layer namespace (`rakitin.commands`). */
+export const commands: {
+  initCommand: typeof initCommand;
+  addCommand: typeof addCommand;
+  integrateCommand: typeof integrateCommand;
+  recipeCommand: typeof recipeCommand;
+  configCommand: typeof configCommand;
+  infoCommand: typeof infoCommand;
+  bareSummary: typeof bareSummary;
+  doctorCommand: typeof doctorCommand;
+  listCommand: typeof listCommand;
+  pluginCommand: typeof pluginCommand;
+  buildContext: typeof buildContext;
+  printResult: typeof printResult;
+  printFailure: typeof printFailure;
+  enableJsonMode: typeof enableJsonMode;
+};
 
-// Config factory
-declare function createConfig(initialConfig?: Partial<RakitinConfig>): Config;
-
-// Template engine factory
-declare function createEngine(options?: TemplateEngineOptions): TemplateEngine;
-
-// Spinner factory
-declare function createSpinner(options?: SpinnerOptions): Spinner;
-
-// Progress bar factory
-declare function createProgressBar(options?: ProgressBarOptions): ProgressBar;
-
-// Step progress factory
-declare function createStepProgress(steps?: string[], options?: StepProgressOptions): StepProgress;
+/** Plugin host namespace (`rakitin.plugins`). */
+export const plugins: {
+  loadPlugins: typeof loadPlugins;
+  createRegistry: typeof createRegistry;
+  getHooks: typeof getHooks;
+  buildPluginContext: typeof buildPluginContext;
+  getGenerators: typeof getGenerators;
+  getExtraKinds: typeof getExtraKinds;
+  resetPlugins: typeof resetPlugins;
+};

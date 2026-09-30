@@ -1,106 +1,110 @@
 /**
  * Recipe (advanced tier) tests - real disk, no network.
+ *
+ * Recipes return the unified `{ok, created, skipped, nextSteps, data}`
+ * envelope with project-root-relative POSIX paths, and route every write
+ * through the safety layer. `install: false` keeps the suite offline.
  */
 const fs = require("fs-extra");
 const path = require("path");
+const vm = require("vm");
 const { recipeCommand, RECIPES } = require("../../lib/commands/recipe");
-const { addCommand } = require("../../lib/commands/add");
-const shared = require("../../lib/commands/shared");
-const installer = require("../../lib/installer");
 
 beforeEach(() => {
-  jest.spyOn(console, "log").mockImplementation(() => {});
   fs.outputJsonSync(path.join(global.tempDir, "package.json"), {
     name: "recipe-demo",
     dependencies: { express: "^4.0.0" },
   });
-  // Block REAL shell installs inside unit test environment.
-  installer.internals.execCommand = jest.fn().mockResolvedValue({
-    success: true,
-    stdout: "",
-    stderr: "",
-  });
 });
 
-afterEach(() => {
-  jest.restoreAllMocks();
-});
+function ctx(extra = {}) {
+  return { root: global.tempDir, install: false, ...extra };
+}
+
+function assertParses(source) {
+  expect(() => new vm.Script(source)).not.toThrow();
+}
 
 describe("recipe registry", () => {
-  test("all four advanced recipes registered", () => {
+  test("all four advanced recipes registered without dependency duplication", () => {
     expect(Object.keys(RECIPES).sort()).toEqual(["auth", "docker", "swagger", "test"]);
-    expect(Object.values(RECIPES).every((r) => r.tier === "advanced")).toBe(true);
+    for (const recipe of Object.values(RECIPES)) {
+      expect(recipe.tier).toBe("advanced");
+      expect(typeof recipe.desc).toBe("string");
+      // Dependency needs live in lib/deps/manifest.js only.
+      expect(recipe.deps).toBeUndefined();
+    }
   });
 
-  test("unknown recipe throws with options", async () => {
-    await expect(recipeCommand("graphql-magic", {})).rejects.toThrow(/Pilihan:/);
+  test("unknown recipe throws with the option list", async () => {
+    await expect(recipeCommand("graphql-magic", ctx())).rejects.toThrow(/Pilihan:/);
   });
 });
 
 describe("auth recipe", () => {
   test("composes middleware + user module + validator + env keys", async () => {
-    const ctx = shared.buildContext({ yes: true });
-    const res = await addCommand("module", "noop-placeholder", ctx).catch(() => null);
+    const result = await recipeCommand("auth", ctx({ arch: "modular", orm: "None" }));
 
-    const result = await recipeCommand("auth", { arch: "modular" });
+    expect(result.ok).toBe(true);
+    expect(result.created).toContain("app/shared/middlewares/auth.middleware.js");
+    expect(result.created).toContain("app/modules/user/controllers/user.controller.js");
+    expect(result.created).toContain("app/modules/user/services/user.service.js");
+    expect(result.created).toContain("app/modules/user/routes/user.router.js");
+    expect(result.created).toContain("app/shared/validators/user.validator.js");
 
-    // middleware
-    expect(
-      fs.existsSync(
-        path.join(global.tempDir, "app/shared/middlewares/auth.middleware.js")
-      )
-    ).toBe(true);
-    // user module
-    expect(fs.existsSync(path.join(global.tempDir, "app/modules/user"))).toBe(true);
-    expect(fs.existsSync(path.join(global.tempDir, "prisma/schema/user.prisma"))).toBe(true);
-    expect(fs.existsSync(path.join(global.tempDir, "app/shared/config/db.js"))).toBe(true);
-    // joi validator parses standalone
-    const validatorPath = path.join(
-      global.tempDir,
-      "app/shared/validators/user.validator.js"
+    for (const entry of result.created) {
+      expect(fs.existsSync(path.join(global.tempDir, entry))).toBe(true);
+    }
+
+    // Every generated JS file parses standalone.
+    const validator = fs.readFileSync(
+      path.join(global.tempDir, "app/shared/validators/user.validator.js"),
+      "utf8"
     );
-    expect(fs.existsSync(validatorPath)).toBe(true);
-    const src = fs
-      .readFileSync(validatorPath, "utf8")
-      .replace(/require\([^)]*\)/g, "({})");
-    expect(() => new (require("vm").Script)(src)).not.toThrow();
-    // env keys merged
+    assertParses(validator);
+    expect(validator).toContain("registerSchema");
+    expect(validator).toContain("loginSchema");
+
     const env = fs.readFileSync(path.join(global.tempDir, ".env.example"), "utf8");
+    expect(env).toContain("# AUTH RECIPE");
     expect(env).toContain("JWT_SECRET=");
   });
 
-  test("is idempotent - second run keeps first files intact", async () => {
-    await recipeCommand("auth", { arch: "modular" });
+  test("is idempotent - second run keeps the first files intact", async () => {
+    await recipeCommand("auth", ctx({ arch: "modular", orm: "None" }));
     const mwFile = path.join(global.tempDir, "app/shared/middlewares/auth.middleware.js");
-    await recipeCommand("auth", { arch: "modular" });
-    // Still a single generated copy - not appended / corrupted
-    const src = fs.readFileSync(mwFile, "utf8");
-    expect((src.match(/jsonwebtoken/g) || []).length).toBeGreaterThanOrEqual(1);
+    const before = fs.readFileSync(mwFile, "utf8");
+
+    const second = await recipeCommand("auth", ctx({ arch: "modular", orm: "None" }));
+
+    expect(second.created).toEqual([]);
+    expect(second.skipped).toContain("app/shared/middlewares/auth.middleware.js");
+    expect(fs.readFileSync(mwFile, "utf8")).toBe(before);
   });
 });
 
 describe("swagger recipe", () => {
-  test("spec includes detected modules and setup file exports mountSwagger", async () => {
-    seedModule("orders");
+  test("writes the swagger config + mount-ready docs entry", async () => {
+    const result = await recipeCommand("swagger", ctx());
 
-    const result = await recipeCommand("swagger", {});
+    expect(result.created).toContain("app/shared/config/swagger.config.js");
+    expect(result.created).toContain("app/docs/index.js");
+    expect(result.data.mountPath).toBe("/api-docs");
 
-    const specPath = path.join(global.tempDir, "app/docs/openapi.json");
-    const spec = fs.readJsonSync(specPath);
-    expect(spec.openapi).toBe("3.0.0");
-    expect(Object.keys(spec.paths)).toContain("/orders");
-
-    const setupSrc = fs.readFileSync(
-      path.join(global.tempDir, "app/docs/swagger.setup.js"),
+    assertParses(fs.readFileSync(path.join(global.tempDir, "app/docs/index.js"), "utf8"));
+    const config = fs.readFileSync(
+      path.join(global.tempDir, "app/shared/config/swagger.config.js"),
       "utf8"
     );
-    expect(setupSrc).toContain("mountSwagger");
-    expect(result.createdFiles.length).toBeGreaterThan(0);
+    expect(config).toContain("mountSwagger");
+
+    const env = fs.readFileSync(path.join(global.tempDir, ".env.example"), "utf8");
+    expect(env).toContain("# API DOCS");
   });
 });
 
 describe("test recipe", () => {
-  test("generates per-module test files + adds npm test script", async () => {
+  test("generates per-module test files + adds npm scripts", async () => {
     seedModule("billing");
 
     const before = JSON.parse(
@@ -108,16 +112,13 @@ describe("test recipe", () => {
     );
     expect(before.scripts?.test).toBeUndefined();
 
-    // Prevent real dev-install shell out
-    const installer = require("../../lib/installer");
-    jest.spyOn(installer.PACKAGE_MANAGERS.npm, "install").mockReturnValue("");
-
-    await recipeCommand("test", {});
+    const result = await recipeCommand("test", ctx());
 
     expect(fs.existsSync(path.join(global.tempDir, "tests/setup.js"))).toBe(true);
     expect(
       fs.existsSync(path.join(global.tempDir, "tests/modules/billing.test.js"))
     ).toBe(true);
+    expect(result.data.scriptsAdded).toContain("test");
 
     const pkg = JSON.parse(
       fs.readFileSync(path.join(global.tempDir, "package.json"), "utf8")
@@ -127,17 +128,29 @@ describe("test recipe", () => {
 });
 
 describe("docker recipe", () => {
-  test("emits Dockerfile + compose + dockerignore; env only once", async () => {
-    const first = await recipeCommand("docker", {});
-    expect(first.createdFiles.map((p) => path.basename(p)).sort()).toEqual([
-      ".dockerignore",
-      "Dockerfile",
-      "docker-compose.yml",
-    ]);
+  test("resolves the entrypoint and emits Dockerfile + .dockerignore", async () => {
+    fs.outputFileSync(path.join(global.tempDir, "app/server.js"), "// entry\n");
+
+    const first = await recipeCommand("docker", ctx());
+    expect(first.created.sort()).toEqual([".dockerignore", "Dockerfile"]);
+    expect(first.data.entrypoint).toBe("app/server.js");
+    expect(fs.readFileSync(path.join(global.tempDir, "Dockerfile"), "utf8")).toContain(
+      'CMD ["node", "app/server.js"]'
+    );
 
     // Second run creates nothing new
-    const second = await recipeCommand("docker", {});
-    expect(second.createdFiles).toEqual([]);
+    const second = await recipeCommand("docker", ctx());
+    expect(second.created).toEqual([]);
+  });
+
+  test("throws when no application entrypoint exists", async () => {
+    const emptyRoot = path.join(global.tempDir, "empty-root");
+    fs.ensureDirSync(emptyRoot);
+
+    await expect(recipeCommand("docker", { root: emptyRoot, install: false })).rejects.toThrow(
+      /entrypoint/i
+    );
+    expect(fs.existsSync(path.join(emptyRoot, "Dockerfile"))).toBe(false);
   });
 });
 

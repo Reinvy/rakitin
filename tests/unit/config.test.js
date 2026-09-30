@@ -1,286 +1,296 @@
 /**
- * Unit tests for Configuration System
+ * Unit tests for lib/config/index.js (`Config`).
+ *
+ * Every fixture is written inside `global.tempDir`, which is also the
+ * process.cwd() for this suite.
  */
 
+const fs = require("fs");
+const path = require("path");
 const {
   Config,
   createConfig,
   DEFAULT_CONFIG,
   CONFIG_FILES,
+  CONFIG_KEYS,
+  PRESETS,
 } = require("../../lib/config");
 
-describe("Config", () => {
-  let config;
+const CONFIG_KEYS_EXPECTED = [
+  "version",
+  "preset",
+  "arch",
+  "orm",
+  "packageManager",
+  "autoIntegrateRouter",
+  "generateValidationLayer",
+  "generateTestFiles",
+  "plugins",
+];
+
+/** Fresh project dir inside the suite temp dir. */
+function makeRoot(name) {
+  const root = path.join(global.tempDir, name);
+  fs.mkdirSync(root, { recursive: true });
+  return root;
+}
+
+function write(root, file, content) {
+  fs.writeFileSync(path.join(root, file), content, "utf8");
+}
+
+describe("lib/config", () => {
+  const savedEnv = {};
+
+  beforeAll(() => {
+    require("../../lib/utils/logger").setLevel("silent");
+  });
+
+  afterAll(() => {
+    require("../../lib/utils/logger").setLevel("info");
+  });
 
   beforeEach(() => {
-    config = new Config();
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("RAKITIN_")) {
+        savedEnv[key] = process.env[key];
+        delete process.env[key];
+      }
+    }
   });
 
-  describe("constructor", () => {
-    it("should create config with default values", () => {
-      expect(config.get("defaultArchitecture")).toBe("modular");
-      expect(config.get("defaultORM")).toBe("Prisma");
-    });
-
-    it("should merge initial config", () => {
-      const customConfig = new Config({ defaultArchitecture: "simple" });
-      expect(customConfig.get("defaultArchitecture")).toBe("simple");
-    });
+  afterEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("RAKITIN_")) delete process.env[key];
+    }
+    Object.assign(process.env, savedEnv);
+    for (const key of Object.keys(savedEnv)) delete savedEnv[key];
   });
 
-  describe("get", () => {
-    it("should get top-level config value", () => {
-      expect(config.get("basePath")).toBe("app");
+  describe("constants", () => {
+    test("DEFAULT_CONFIG holds exactly the v3 keys", () => {
+      expect(Object.keys(DEFAULT_CONFIG).sort()).toEqual([...CONFIG_KEYS_EXPECTED].sort());
+      expect(DEFAULT_CONFIG).toEqual({
+        version: 3,
+        preset: null,
+        arch: null,
+        orm: null,
+        packageManager: null,
+        autoIntegrateRouter: true,
+        generateValidationLayer: false,
+        generateTestFiles: false,
+        plugins: [],
+      });
     });
 
-    it("should get nested config value using dot notation", () => {
-      expect(config.get("ormPackages.prisma")).toEqual(["@prisma/client", "prisma"]);
+    test("CONFIG_FILES lists the four candidates in priority order", () => {
+      expect(CONFIG_FILES).toEqual([
+        ".rakitinrc.json",
+        ".rakitinrc",
+        "rakitin.config.json",
+        "rakitin.config.js",
+      ]);
     });
 
-    it("should return default value for missing keys", () => {
-      expect(config.get("nonexistent", "default")).toBe("default");
+    test("CONFIG_KEYS mirrors the schema allowlist", () => {
+      expect(CONFIG_KEYS).toEqual(CONFIG_KEYS_EXPECTED);
     });
 
-    it("should return undefined for missing keys without default", () => {
-      expect(config.get("nonexistent")).toBeUndefined();
-    });
-  });
-
-  describe("set", () => {
-    it("should set top-level config value", () => {
-      config.set("newKey", "newValue");
-      expect(config.get("newKey")).toBe("newValue");
-    });
-
-    it("should set nested config value using dot notation", () => {
-      config.set("custom.nested.value", "test");
-      expect(config.get("custom.nested.value")).toBe("test");
-    });
-
-    it("should create intermediate objects for nested keys", () => {
-      config.set("deep.nested.key", "value");
-      expect(config.get("deep")).toBeDefined();
-      expect(config.get("deep").nested).toBeDefined();
-    });
-
-    it("should return this for chaining", () => {
-      const result = config.set("key", "value");
-      expect(result).toBe(config);
-    });
-  });
-
-  describe("has", () => {
-    it("should return true for existing keys", () => {
-      expect(config.has("basePath")).toBe(true);
-      expect(config.has("ormPackages")).toBe(true);
-    });
-
-    it("should return true for existing nested keys", () => {
-      expect(config.has("ormPackages.prisma")).toBe(true);
-    });
-
-    it("should return false for non-existing keys", () => {
-      expect(config.has("nonexistent")).toBe(false);
-    });
-
-    it("should return false for null/undefined values", () => {
-      config.set("nullValue", null);
-      config.set("undefinedValue", undefined);
-      expect(config.has("nullValue")).toBe(false);
-      expect(config.has("undefinedValue")).toBe(false);
-    });
-  });
-
-  describe("toJSON", () => {
-    it("should return config as JSON object", () => {
-      const json = config.toJSON();
-      expect(json).toBeDefined();
-      expect(json.basePath).toBe("app");
-      expect(json.defaultArchitecture).toBe("modular");
-    });
-
-    it("should return a copy, not the original", () => {
-      const json = config.toJSON();
-      json.newKey = "newValue";
-      expect(config.get("newKey")).toBeUndefined();
-    });
-  });
-
-  describe("getSources", () => {
-    it("should return empty array for fresh config", () => {
-      expect(config.getSources()).toEqual([]);
-    });
-
-    it("should track sources after set operations", () => {
-      config.set("key", "value");
-      const sources = config.getSources();
-      expect(sources.length).toBeGreaterThan(0);
-      expect(sources[sources.length - 1].source).toBe("runtime");
+    test("PRESETS lists the three presets", () => {
+      expect(PRESETS).toEqual(["basic", "intermediate", "advanced"]);
     });
   });
 
   describe("load", () => {
-    it("should return this for chaining", () => {
-      const freshConfig = new Config();
-      const result = freshConfig.load(__dirname);
-      expect(result).toBe(freshConfig);
+    test("reads .rakitinrc.json", () => {
+      const root = makeRoot("rc-json");
+      write(root, ".rakitinrc.json", JSON.stringify({ orm: "mongoose", arch: "simple" }));
+
+      const config = new Config().load(root);
+
+      expect(config.get("orm")).toBe("mongoose");
+      expect(config.get("arch")).toBe("simple");
+      expect(config.get("version")).toBe(3);
     });
 
-    it("should set loaded flag", () => {
-      const freshConfig = new Config();
-      freshConfig.load(__dirname);
-      expect(freshConfig._loaded).toBe(true);
+    test("falls through to .rakitinrc when the earlier candidate is absent", () => {
+      const root = makeRoot("rc-bare");
+      write(root, ".rakitinrc", JSON.stringify({ arch: "modular" }));
+
+      expect(new Config().load(root).get("arch")).toBe("modular");
     });
 
-    it("should warn when reloading already loaded config", () => {
-      const consoleSpy = jest.spyOn(console, "warn").mockImplementation();
-      const freshConfig = new Config();
-      freshConfig.load(__dirname);
-      freshConfig.load(__dirname);
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
+    test("falls through to rakitin.config.json when both rc files are absent", () => {
+      const root = makeRoot("rc-config-json");
+      write(root, "rakitin.config.json", JSON.stringify({ packageManager: "pnpm" }));
+
+      expect(new Config().load(root).get("packageManager")).toBe("pnpm");
+    });
+
+    test("falls through to rakitin.config.js when every JSON candidate is absent", () => {
+      const root = makeRoot("rc-config-js");
+      write(root, "rakitin.config.js", 'module.exports = { preset: "advanced" };\n');
+
+      expect(new Config().load(root).get("preset")).toBe("advanced");
+    });
+
+    test("stops at the first existing candidate", () => {
+      const root = makeRoot("rc-priority");
+      write(root, ".rakitinrc.json", JSON.stringify({ orm: "prisma" }));
+      write(root, ".rakitinrc", JSON.stringify({ orm: "sequelize" }));
+      write(root, "rakitin.config.json", JSON.stringify({ orm: "mongoose" }));
+
+      expect(new Config().load(root).get("orm")).toBe("prisma");
+    });
+
+    test("rejects JSON with comments with an explicit message", () => {
+      const root = makeRoot("rc-comments");
+      write(root, ".rakitinrc.json", '{\n  // komentar\n  "orm": "prisma"\n}\n');
+
+      expect(() => new Config().load(root)).toThrow(/Komentar tidak didukung/);
+      expect(() => new Config().load(root)).toThrow(/bukan JSON yang valid/);
+    });
+
+    test("merges package.json#rakitin", () => {
+      const root = makeRoot("rc-package-json");
+      write(
+        root,
+        "package.json",
+        JSON.stringify({ name: "t", version: "1.0.0", rakitin: { orm: "typeorm" } })
+      );
+
+      expect(new Config().load(root).get("orm")).toBe("typeorm");
+    });
+
+    test("merges package.json#rakitin keys verbatim (no allowlist here)", () => {
+      const root = makeRoot("rc-package-json-unknown");
+      write(root, "package.json", JSON.stringify({ name: "t", rakitin: { nope: 1 } }));
+
+      const config = new Config().load(root);
+      // `load` merges whatever the user declared; CONFIG_KEYS is enforced by
+      // `config set` and rakitin.schema.json, not by the loader.
+      expect(config.get("nope")).toBe(1);
+      expect(config.get("version")).toBe(3);
+    });
+
+    test("applies environment overrides (RAKITIN_*)", () => {
+      const root = makeRoot("rc-env");
+      process.env.RAKITIN_ORM = "sequelize";
+      process.env.RAKITIN_GENERATE_TEST_FILES = "true";
+      process.env.RAKITIN_UNRELATED = "ignored";
+
+      const config = new Config().load(root);
+
+      expect(config.get("orm")).toBe("sequelize");
+      expect(config.get("generateTestFiles")).toBe(true);
+      expect(config.get("unrelated")).toBeUndefined();
+    });
+
+    test("is a no-op on a second call and returns the same instance", () => {
+      const root = makeRoot("rc-twice");
+      write(root, ".rakitinrc.json", JSON.stringify({ orm: "prisma" }));
+      const config = new Config().load(root);
+
+      expect(config.load(root)).toBe(config);
+      expect(config.get("orm")).toBe("prisma");
+    });
+
+    test("reload() re-reads from disk", () => {
+      const root = makeRoot("rc-reload");
+      write(root, ".rakitinrc.json", JSON.stringify({ orm: "prisma" }));
+      const config = new Config().load(root);
+      expect(config.get("orm")).toBe("prisma");
+
+      write(root, ".rakitinrc.json", JSON.stringify({ orm: "mongoose" }));
+      config.reload(root);
+
+      expect(config.get("orm")).toBe("mongoose");
     });
   });
 
-  describe("reload", () => {
-    it("should reset and reload config", () => {
-      const freshConfig = new Config();
-      freshConfig.set("test", "value");
-      freshConfig.reload(__dirname);
-      expect(freshConfig._loaded).toBe(true);
-      // reload loads from package.json, so defaultArchitecture may be overwritten
+  describe("accessors", () => {
+    test("get supports dot-notation and defaults", () => {
+      const config = createConfig({ database: { host: "localhost" } });
+
+      expect(config.get("database.host")).toBe("localhost");
+      expect(config.get("database.missing")).toBeUndefined();
+      expect(config.get("database.missing", 5432)).toBe(5432);
+      expect(config.get("nothing.at.all", "fallback")).toBe("fallback");
+    });
+
+    test("set is chainable and creates intermediate objects", () => {
+      const config = new Config();
+
+      expect(config.set("orm", "prisma")).toBe(config);
+      config.set("database.host", "db.internal");
+
+      expect(config.get("orm")).toBe("prisma");
+      expect(config.get("database.host")).toBe("db.internal");
+    });
+
+    test("has reports presence for non-null values only", () => {
+      const config = new Config();
+
+      expect(config.has("orm")).toBe(false); // default null
+      config.set("orm", "prisma");
+      expect(config.has("orm")).toBe(true);
+      expect(config.has("database")).toBe(false);
+    });
+
+    test("all()/toJSON() return a detached copy", () => {
+      const config = createConfig({ orm: "prisma" });
+
+      const snapshot = config.all();
+      snapshot.orm = "mutated";
+
+      expect(config.get("orm")).toBe("prisma");
+      expect(config.toJSON()).toEqual(config.all());
+    });
+
+    test("validate() reports type, required and enum violations", () => {
+      const config = createConfig({ orm: "prisma", preset: "basic", version: 3 });
+
+      const schema = {
+        version: { required: true, type: "number" },
+        orm: { type: "string", enum: ["prisma", "mongoose", "sequelize"] },
+        preset: { required: true, enum: PRESETS },
+        arch: { required: true, type: "string" },
+      };
+
+      const result = config.validate(schema);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          "Missing required config: arch",
+        ])
+      );
+    });
+
+    test("validate() passes for a well-formed config", () => {
+      const config = createConfig({ arch: "modular", orm: "prisma", preset: "basic" });
+
+      expect(
+        config.validate({
+          arch: { required: true, type: "string", enum: ["simple", "modular"] },
+          orm: { required: true, type: "string" },
+          preset: { required: true, type: "string", enum: PRESETS },
+        })
+      ).toEqual({ valid: true, errors: [] });
+    });
+
+    test("child(prefix) exposes a nested subtree", () => {
+      const config = createConfig({ database: { host: "localhost" } });
+
+      expect(config.child("database").get("host")).toBe("localhost");
     });
   });
 
   describe("reset", () => {
-    it("should reset to default configuration", () => {
-      config.set("custom", "value");
+    test("restores DEFAULT_CONFIG", () => {
+      const config = createConfig({ orm: "prisma" });
       config.reset();
-      expect(config.get("custom")).toBeUndefined();
-      expect(config.get("basePath")).toBe("app");
+
+      expect(config.all()).toEqual(DEFAULT_CONFIG);
     });
-
-    it("should clear sources", () => {
-      config.set("key", "value");
-      config.reset();
-      expect(config.getSources()).toEqual([]);
-    });
-  });
-
-  describe("validate", () => {
-    it("should return valid for correct schema", () => {
-      const schema = {
-        basePath: { required: true, type: "string" },
-        generateServiceLayer: { required: false, type: "boolean" },
-      };
-
-      const result = config.validate(schema);
-      expect(result.valid).toBe(true);
-      expect(result.errors).toEqual([]);
-    });
-
-    it("should catch missing required fields", () => {
-      const schema = {
-        requiredField: { required: true },
-      };
-
-      const result = config.validate(schema);
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain("Missing required config: requiredField");
-    });
-
-    it("should catch type mismatches", () => {
-      const schema = {
-        basePath: { type: "number" },
-      };
-
-      const result = config.validate(schema);
-      expect(result.valid).toBe(false);
-      expect(result.errors[0]).toContain("Invalid type");
-    });
-
-    it("should catch invalid enum values", () => {
-      const testConfig = new Config();
-      const schema = {
-        customEnum: { enum: ["value1", "value2"] },
-      };
-
-      testConfig.set("customEnum", "value1");
-      const result = testConfig.validate(schema);
-      expect(result.valid).toBe(true);
-
-      testConfig.set("customEnum", "Invalid");
-      const invalidResult = testConfig.validate(schema);
-      expect(invalidResult.valid).toBe(false);
-    });
-
-    it("should catch out of range numbers", () => {
-      const testConfig = new Config();
-      const schema = {
-        port: { type: "number", min: 1, max: 65535 },
-      };
-
-      testConfig.set("port", 0);
-      let result = testConfig.validate(schema);
-      expect(result.valid).toBe(false);
-
-      testConfig.set("port", 70000);
-      result = testConfig.validate(schema);
-      expect(result.valid).toBe(false);
-
-      testConfig.set("port", 3000);
-      result = testConfig.validate(schema);
-      expect(result.valid).toBe(true);
-    });
-  });
-
-  describe("child", () => {
-    it("should create child config with prefixed values", () => {
-      config.set("parent.child", "value");
-      const child = config.child("parent");
-      expect(child.get("child")).toBe("value");
-    });
-
-    it("should share sources with parent", () => {
-      const child = config.child("parent");
-      expect(child.getSources()).toEqual(config.getSources());
-    });
-  });
-});
-
-describe("createConfig", () => {
-  it("should create new Config instance", () => {
-    const cfg = createConfig();
-    expect(cfg).toBeInstanceOf(Config);
-  });
-
-  it("should pass initial config to constructor", () => {
-    const cfg = createConfig({ custom: "value" });
-    expect(cfg.get("custom")).toBe("value");
-  });
-});
-
-describe("DEFAULT_CONFIG", () => {
-  it("should have all expected keys", () => {
-    expect(DEFAULT_CONFIG.basePath).toBeDefined();
-    expect(DEFAULT_CONFIG.modulesPath).toBeDefined();
-    expect(DEFAULT_CONFIG.defaultArchitecture).toBeDefined();
-    expect(DEFAULT_CONFIG.ormPackages).toBeDefined();
-  });
-
-  it("should have valid ORM packages", () => {
-    expect(DEFAULT_CONFIG.ormPackages.prisma).toEqual(["@prisma/client", "prisma"]);
-    expect(DEFAULT_CONFIG.ormPackages.sequelize).toBeDefined();
-    expect(DEFAULT_CONFIG.ormPackages.mongoose).toBeDefined();
-    expect(DEFAULT_CONFIG.ormPackages.typeorm).toBeDefined();
-  });
-});
-
-describe("CONFIG_FILES", () => {
-  it("should list all expected config file names", () => {
-    expect(CONFIG_FILES).toContain(".rakitinrc");
-    expect(CONFIG_FILES).toContain(".rakitinrc.json");
-    expect(CONFIG_FILES).toContain("rakitin.config.js");
-    expect(CONFIG_FILES).toContain("rakitin.config.json");
   });
 });

@@ -1,502 +1,508 @@
-# rakitin Architecture
+# rakitin Architecture (v3)
 
-> Applies to `rakitin` v2.0.0 (CommonJS, Node >= 18).
-> This document describes how the CLI actually works today: module layout,
-> request lifecycle, core design principles, generator anatomy, template
-> strategy, and test architecture.
+> Applies to rakitin v3: CommonJS only, Node `^22.13.0 || >=23.5.0`, runtime
+> dependencies exactly `ejs`, `inquirer`, `yargs`.
+> This document describes how the CLI actually works: layering, the safety
+> layer, the wiring engine, the dependency manifest, the plugin layer, the
+> template engine, and the test architecture.
 
 ---
 
 ## 1. High-level picture
 
 ```
-                    ┌──────────────────────────────┐
-   user shell ────▶ │ bin/rakitin.js (yargs CLI)   │
-                    └──────────────┬───────────────┘
-                                   │ buildContext / enterProjectRoot / safety
-                                   ▼
-                    ┌──────────────────────────────┐
-                    │ lib/commands/*               │  headless command layer:
-                    │ add·init·integrate·recipe·   │  shared.js builds context,
-                    │ info                         │  printResult renders output
-                    └──────────────┬───────────────┘
-              ┌────────────────────┼─────────────────────┐
-              ▼                    ▼                     ▼
-   ┌────────────────────┐ ┌────────────────┐ ┌──────────────────────┐
-   │ lib/generator/**   │ │ lib/project/   │ │ lib/deps/manifest.js │
-   │ codegen primitives │ │ detector.js    │ │ KIND_DEPENDENCIES →  │
-   └─────────┬──────────┘ └────────────────┘ │ installer            │
-             │ every write                   └──────────────────────┘
-             ▼
-   ┌────────────────────┐        ┌────────────────────┐
-   │ lib/safety.js      │        │ lib/naming.js      │
-   │ write-if-absent,   │        │ single source of   │
-   │ dry-run plan, .bak │        │ truth for names    │
-   └────────────────────┘        └────────────────────┘
+                    ┌──────────────────────────────────────┐
+   user shell ────▶ │ bin/rakitin.js (yargs factory)       │
+                    └───────────────┬──────────────────────┘
+                                    │ run(): buildContext → enterProjectRoot
+                                    │   → beginPlan/resetPlan → setOverwrite
+                                    │   → runWithPlugins → printResult/printFailure
+                                    ▼
+                    ┌──────────────────────────────────────┐
+                    │ lib/commands/*                       │  command layer
+                    │ init add config integrate recipe     │  (headless; prompts only
+                    │ info doctor list plugin              │   for `add module|middleware`)
+                    └───────┬──────────────┬───────────────┘
+                            │              │
+        ┌───────────────────▼──┐      ┌────▼─────────────────────┐
+        │ lib/generator/**     │      │ lib/deps/manifest.js     │
+        │ codegen primitives   │      │ KIND_DEPENDENCIES →      │
+        │ (+ lib/templates/**) │      │ lib/installer.js         │
+        └───────────┬──────────┘      └──────────────────────────┘
+                    │ every write
+                    ▼
+   ┌────────────────────────┐  ┌──────────────────────┐  ┌───────────────────┐
+   │ lib/safety.js          │  │ lib/naming.js        │  │ lib/project/      │
+   │ write-if-absent,       │  │ single source of     │  │ detector.js       │
+   │ .bak, plan, markers,   │  │ truth for names      │  │ detect-first      │
+   │ updateJsonFile,        │  └──────────────────────┘  └───────────────────┘
+   │ mergeEnvExample        │
+   └────────────────────────┘
 ```
 
-Two entry points exist: `bin/rakitin.js` (the yargs command surface — `init`,
-`add`, `integrate`, `recipe`, `info`, `doctor`, `list`, legacy `router`; with no
-args it falls through to the interactive menu) and `index.js` (the legacy
-interactive menu, exporting `{ main, run: main }` behind a
-`require.main === module` guard so tests drive it without spawning a process).
+There is exactly one CLI entry point: `bin/rakitin.js`. There is no second,
+divergent build: the ESM `dist/` tree and the esbuild pipeline were removed
+in v3, and the package is CJS-only (`exports` subpaths serve ESM consumers
+through CJS interop).
 
 ---
 
-## 2. Directory tree of `lib/**`
+## 2. Removed legacy stack (v3)
 
-One-line purpose per file. Paths are relative to repository root.
+| Removed | Why |
+| --- | --- |
+| `index.js` (root interactive menu) + `lib/prompt.js` | bare `rakitin` now prints a non-interactive project summary; the menu was unscriptable and untestable |
+| `rakitin router` command + `lib/generator/router/router.js` (`integrateRouter`, `createAutoRouter*`, `GLOBAL_MIDDLEWARE_CHOICES`) | superseded by the headless `integrate` on top of the wiring engine (§5) |
+| `lib/generator/module/module.js` (interactive module wrapper) | `add module` is flag-complete |
+| `lib/generator/shared/file-validator.js`, `path-resolver.js`, `error-handler.js` | duplicate name/path logic and an `ErrorHandler` with two divergent throw/return semantics; replaced by `lib/naming.js` + `lib/safety.js` |
+| `dist/`, `build.config.js`, `build*` scripts | stale second CLI, ESM syntax resolved as CJS, templates not shipped |
+| `package.json#prisma.schema` write + `postinstall: prisma skills sync` | deprecated pointer and a masked-failure install hook |
+| ORM libraries as runtime dependencies | `@prisma/client`, `mongoose`, `mysql2`, `prisma`, `sequelize` are now devDependencies (tests only) |
+| `fs-extra` under `lib/`, `bin/` | runtime deps are exactly `ejs`, `inquirer`, `yargs` |
+
+Legacy capability parity: everything the menu/`router` exposed is reachable
+through `init`, `add …` and `integrate`. See
+[migration-v2-to-v3.md](./migration-v2-to-v3.md).
+
+---
+
+## 3. Directory tree of `lib/**`
 
 ```
 lib/
+├── index.js                 Library entry: { version, bareSummary, config,
+│                            naming, safety, project, commands, deps, plugins }.
 ├── naming.js                Single source of truth for names: case converters,
-│                            normalizeModuleName(), getModuleVariants(),
-│                            toIdentifier(), toSafeFileName(), RESERVED_WORDS.
-├── constants.js             Lazy conventional paths: getPaths(root) snapshot +
-│                            per-path getters resolved at access time.
-├── safety.js                Universal file-safety layer: writeFileIfNotExistsSafe,
-│                            overwriteWithBackup (.bak), dry-run plan capture,
-│                            marker-based buildRoutesContent().
-├── prompt.js                Interactive menu prompts for the legacy flow.
-├── installer.js             Cross-PM package installation (npm/pnpm/yarn/bun)
-│                            with retry/backoff, lock-file detection via
-│                            getPackageManager(), injectable `internals`.
-├── utils.js                 Legacy barrel: ensureDir, writeFileIfNotExists
-│                            (delegates to safety), path cache; re-exports naming.
-├── utils/
-│   ├── index.js             Barrel re-export of ./logger.js.
-│   └── logger.js            Leveled logger (debug/info/warn/error/success);
-│                            instance tracking via Logger.clearInstances().
-├── ui/
-│   ├── index.js             Barrel re-export of ./progress.js.
-│   └── progress.js          Terminal progress UI: Spinner, progress bar, steps.
-├── project/
-│   └── detector.js          detectProject(root): package.json + disk scan →
-│                            frameworks, ORMs, module inventory + per-module
-│                            architecture, router markers, middlewares.
-├── deps/
-│   └── manifest.js          Unified dependency registry: KIND_DEPENDENCIES,
-│                            resolvePackagesForKinds(), ensureDependencies()
-│                            (install exactly once with detected PM), ormToKind().
-├── commands/
-│   ├── shared.js            buildContext(argv), enterProjectRoot(ctx) (chdir),
-│   │                        printResult(json|human), enableJsonMode(), withSpinner().
-│   ├── init.js              initCommand(): detect project + write idempotent
-│   │                        .rakitinrc.json with preset heuristics.
-│   ├── add.js               addCommand(thing, name, ctx): headless dispatch for
-│   │                        module|middleware|util|config|endpoint|validation|docs.
-│   ├── integrate.js         integrateCommand(): marker-based main-router wiring,
-│   │                        exists-checks before requires, per-module arch.
-│   ├── recipe.js            recipeCommand(name): composite advanced recipes
-│   │                        (auth/swagger/test/docker); RECIPES registry;
-│   │                        mergeEnvExample() helper.
-│   └── info.js              doctorCommand(), infoCommand(), listCommand() and
-│                            the CATALOG that drives `rakitin list`.
-├── config/
-│   └── index.js             Multi-source Config class (.rakitinrc*, package.json,
-│                            RAKITIN_* env). Loader exists but is NOT yet wired
-│                            into the command/menu flow.
-├── template/
-│   ├── engine.js            EJS wrapper: TemplateEngine, renderTemplate(),
-│   │                        defaultEngine; cached compiles, FIFO eviction.
-│   └── index.js             Barrel re-export of ./engine.js.
+│                            normalizeModuleName, getModuleVariants, toIdentifier,
+│                            toSafeFileName, assertSafeName, sanitizeFieldName,
+│                            toFieldIdentifier, RESERVED_WORDS.
+├── constants.js             Lazy paths: getPaths(root) snapshot + per-key getters
+│                            resolved at ACCESS time.
+├── safety.js                Write choke point: plan (beginPlan/getPlan/resetPlan),
+│                            setDryRun/isDryRun, setOverwrite/isOverwrite,
+│                            backupPathFor, writeFileIfNotExistsSafe,
+│                            overwriteWithBackup, writeOutcome, updateJsonFile,
+│                            mergeEnvExample, buildMarkedBlock, buildRoutesContent,
+│                            marker tokens.
+├── installer.js             Cross-PM installs (npm/pnpm/yarn/bun) via
+│                            spawn(command, args, { shell:false }), retry only on
+│                            network/registry failures; injectable `internals`.
+├── utils.js                 ensureDir (plan-aware), writeFileIfNotExists,
+│                            relativePosix; re-exports naming.
+├── utils/logger.js          Leveled logger; the ONLY module allowed to write to
+│                            the console under lib/**.
+├── ui/progress.js           Spinner / ProgressBar / StepProgress.
+├── project/detector.js      detectProject(root): express, ORMs, lockfile PM,
+│                            per-module architecture, router markers, middlewares.
+├── deps/manifest.js         KIND_DEPENDENCIES + resolvePackagesForKinds +
+│                            ensureDependencies (one-shot) + ormToKind.
+├── config/index.js          Config loader (env → package.json#rakitin → rc file),
+│                            DEFAULT_CONFIG/CONFIG_KEYS/PRESETS.
+├── template/engine.js       EJS wrapper: TemplateEngine, renderTemplate,
+│                            defaultEngine (source/mtime-keyed cache).
+├── plugins/                 index.js (host seam), loader.js (resolution),
+│                            registry.js (API v1 validation + registry).
+├── commands/                shared.js (context/envelope/hooks), init, add, config,
+│                            integrate, recipe, info, doctor, list, plugin,
+│                            plugin-seam.js, index.js (barrel).
 └── generator/
     ├── module/
-    │   ├── module.js         Interactive "generate module" wrapper.
-    │   ├── arch/
-    │   │   ├── arch.js        Barrel spreading simple + modular exports.
-    │   │   ├── simple.arch.js simpleArch(moduleName, orm): controller/service/
-    │   │   │                  router flat inside modules/<name>/.
-    │   │   └── modular.arch.js modularArch(moduleName, orm): controllers/
-    │   │                      services/models/routes subfolders.
-    │   └── orm/              Per-ORM model/service wiring snippets
-    │                        (prisma, sequelize, mongoose, typeorm, none).
-    ├── middleware/
-    │   └── middleware.js     createMiddleware(type, customName): auth | logger |
-    │                         error | request-time | custom.
-    ├── config/
-    │   └── config.js         createConfig(type, { withEnvExample }) env-based
-    │                         config files.
-    ├── util/
-    │   └── util.js           generateUtil(): utility-function generator menu.
-    ├── router/
-    │   └── router.js         integrateRouter() (interactive),
-    │                        createAutoRouterTemplate(), createAutoRouter(),
-    │                        integrateAutoRouter(); GLOBAL_MIDDLEWARE_CHOICES
-    │                        whitelist (auth/logger/error/request-time).
-    ├── api/
-    │   ├── endpoint/index.js     CRUD endpoint generator for existing modules.
-    │   ├── validation/index.js   Joi validation schema generator.
-    │   └── documentation/index.js OpenAPI/Swagger scaffolding generator.
-    └── shared/
-        ├── error-handler.js ErrorHandler static helpers; handleError(error,
-        │                   context, shouldThrow=true) rethrows by default.
-        ├── file-validator.js Pre-import existence checks for router integration.
-        ├── path-resolver.js Import-path computation for modular/simple layouts.
-        ├── orm-service-generator.js generateServiceCode(moduleName, orm, style).
-        └── validation-utils.js validateModuleName/validateOrm/validateArchitecture,
-                            handleError(context, error) (ALWAYS rethrows),
-                            createErrorMessage(type, details).
+    │   ├── verbs.js         VERB_ROUTES, VERB_MESSAGES, TEMPLATE_VERBS,
+    │   │                    verbsForTemplate, routesFor, moduleTemplateLocals.
+    │   ├── arch/            simple.arch.js / modular.arch.js (+ arch.js barrel).
+    │   └── orm/             prisma / sequelize / mongoose / typeorm / none.
+    ├── router/wiring.js     The single wiring engine (§5).
+    ├── middleware/middleware.js  createMiddleware + MIDDLEWARE_KINDS.
+    ├── config/config.js     createConfig + CONFIG_KINDS.
+    ├── util/util.js         createUtil + UTIL_KINDS.
+    ├── api/endpoint/        generateEndpoint (resources + router mount).
+    ├── api/validation/      generateValidation + extractModuleFields.
+    ├── api/documentation/   generateDocumentation + DOCS_KINDS (+ yaml.js).
+    ├── api/graphql/         generateGraphQL (+ templates/graphql).
+    ├── api/websocket/       generateWebSocket (+ templates/websocket).
+    ├── api/testfile/        generateTestFiles, renderModuleTest, ensureTestInfra.
+    └── shared/              orm-service-generator.js, validation-utils.js.
 ```
 
-Supporting files outside `lib/`: `bin/rakitin.js` (CLI surface), `index.js`
-(interactive entry, exports `main`/`run`), `tests/setup.js`, `jest.config.js`.
+Templates live in `lib/templates/<area>/**.ejs` and are rendered through
+`lib/template/engine.js` (§7).
 
 ---
 
-## 3. Request lifecycle of a headless command
+## 4. Command → generator layering
 
-Example: `rakitin add module user --orm none --arch modular --json`.
+### 4.1 The `run()` wrapper
+
+Every command in `bin/rakitin.js` is `run(argv, fn)`:
+
+1. `enableJsonMode()` when `--json` (logger → `silent`, `RAKITIN_JSON=1`).
+2. `buildContext(argv)` — normalizes the global flags, resolves the project
+   root, preset, ORM, arch, pm, and the per-command inputs.
+3. `enterProjectRoot(context)` — `process.chdir(root)` **exactly once**, so
+   every lazy path helper (`getPaths()`, `modulesPath()`, …) agrees without
+   changing their signatures. `config` resolves against `context.root`.
+4. `beginPlan()` when `--dry-run`, else `resetPlan()`; then
+   `setOverwrite(context.overwrite)`.
+5. `--cli-version` short-circuits and prints the version.
+6. `runWithPlugins(context, {command}, () => fn(context))` — plugin hooks.
+7. On `--dry-run`, the collected plan is attached to the result if the
+   command did not provide one.
+8. `printResult(result, context)`; any throw → `printFailure(error, json)`
+   and `process.exitCode = 1`; `finally` → `resetPlan()`.
+
+### 4.2 The command layer
+
+`lib/commands/*` owns flag interpretation, prompts (only `add module` and
+`add middleware`, and only when the positional is missing and `--yes` is
+absent), dependency-kind selection, `nextSteps`, and the envelope. It never
+writes files directly — it calls generators and the safety layer.
+
+### 4.3 The generator layer
+
+Generators are **headless**: they take plain data, resolve paths lazily, and
+return `{ created: string[], skipped: string[], data? }` with paths
+**relative to the project root** (POSIX). They never prompt and never
+install; the command layer decides the kinds and calls
+`ensureDependencies` once with the union.
+
+`add module` composition:
 
 ```
-bin/rakitin.js
-  │ yargs parses argv against global options (--cwd --yes --overwrite
-  │   --dry-run --json --no-install --preset --arch --orm --pm)
-  ▼
-runAdd(argv)                              [bin/rakitin.js]
-  │ 1. buildContext(argv)                 [lib/commands/shared.js]
-  │      → { cwd, yes, overwrite, dryRun, json, install,
-  │           preset, arch, orm, pm }
-  │ 2. enterProjectRoot(ctx)              chdir to ctx.cwd when different;
-  │      all helpers read process.cwd() lazily, so one chdir keeps every
-  │      generator aligned without touching signatures.
-  │ 3. if (ctx.json) enableJsonMode()     logger silenced to 'error';
-  │      RAKITIN_JSON=1 → printResult emits pure JSON on stdout.
-  │ 4. if (ctx.dryRun) safety.beginPlan() no writes hit disk; operations
-  │      are recorded into the plan instead.
-  ▼
-addCommand(thing, name, ctx)              [lib/commands/add.js]
-  │ switch on thing → feature-specific headless function
-  │ missing decisions fall back to inquirer ONLY when !ctx.yes
-  ▼
-generator primitive (e.g. modularArch(name, orm))
-  │ writes route through safety.writeFileIfNotExistsSafe /
-  │ utils.writeFileIfNotExists (legacy alias, same semantics)
-  ▼
-ensureDependencies([...kinds], { pm })    [lib/deps/manifest.js]
-  │ resolvePackagesForKinds → unique package set →
-  │ installer.installIfNeeded(packages, { packageManager })
-  ▼
-printResult({ createdFiles?, skipped?, nextSteps?, plan? })
-  │ human mode : 📁 files · ℹ️ skipped count · 🧭 numbered next steps
-  │ JSON mode  : { ok:true, created, skipped, plan, nextSteps }
-  ▼
-safety.resetPlan(); errors → fail(err, json) prints
-  { ok:false, error } and exits with code 1.
+archFn(kebab, ormName, { template })        → controller/service/router (+ verbs)
+  ├─ ormFn(kebab, "Simple"|"Modular")       → model/entity/schema + connection
+  ├─ generateGraphQL({ module })            when template === "graphql"
+  ├─ generateWebSocket({ module })          when template === "realtime"
+  ├─ generateTestFiles({ module })          when --with-tests | generateTestFiles
+  └─ integrateCommand({ root })             when autoIntegrateRouter
+ensureDependencies(union(kinds), { pm, install, extraKinds })
 ```
 
-The same skeleton drives `init`, `recipe`, and `integrate` handlers in
-`bin/rakitin.js`; only the middle "command" call differs.
+### 4.4 Detect-first
+
+`detectProject(root)` reads `package.json` and the disk **before** anything
+is written: Express presence/version, installed ORMs, lockfile-based package
+manager, `app/modules/**` inventory with each module's architecture
+(`routes/<kebab>.router.js` ⇒ modular, `<kebab>.controller.js` ⇒ simple),
+main-router state + marker presence, and available middlewares. Consumers:
+`init`, `integrate`, `doctor`, `info`, `list`, the recipes, and
+`buildContext`'s preset auto-detection.
 
 ---
 
-## 4. Core principles
+## 5. The wiring engine (`lib/generator/router/wiring.js`)
 
-### 4.1 Single source of truth: `lib/naming.js`
-
-Every directory name, identifier, or require line generated by rakitin must be
-derived from `lib/naming.js`:
-
-- Case converters: `toPascalCase`, `toCamelCase`, `toKebabCase`, `toSnakeCase`,
-  `toTitleCase`, `toConstantCase`.
-- `normalizeModuleName(name)` → kebab-case directory form (cached, throws on empty).
-- `getModuleVariants(name)` → `{ raw, kebab, pascal, camel, snake, constant,
-  identifier }` computed in one call.
-- `toIdentifier(str, { casing })` → the ONLY sanctioned way to embed user input
-  into JavaScript identifiers (see §5).
-- `toSafeFileName(str)` → sanitized kebab file names (no separators/control chars).
-
-Hand-rolling case conversion inside generators is forbidden; duplicated logic is
-how "mixed" architectures drift out of sync.
-
-### 4.2 Lazy path resolution: `getPaths(root)` vs captured constants
-
-Older versions exported plain string constants (e.g. `modulesPath`) resolved
-once at `require()` time. That was a defect: tests override cwd after modules
-are loaded, and `--cwd` would silently target stale paths. Current contract:
+One engine produces main-router wiring for **both** architectures, which
+removes the old undefined-handler boot-crash class (v2's simple wiring
+referenced `controller.create`, which the simple controller did not export).
 
 ```js
-const { getPaths } = require("../constants");
+buildWiringEntries(modules, { root })
+// modules: detector inventory [{dirName, name, architecture}]
+// -> { entries: [{kebab, architecture, id, mountPath, routerFile,
+//                 relRequireFromRoutes}],
+//      skipped: [{name, reason}] }
 
-// GOOD - evaluated at use time against the current root
-const p = getPaths(root ?? process.cwd());
-fs.existsSync(p.modulesPath);
-
-// BAD - destructured once at module load, frozen forever
-const { modulesPath } = require("../constants"); // never do this
+renderRouteLines(entries, middlewareEntries)
+// -> "const <id> = require('<relative>');\n…\nrouter.use('/<kebab>', <id>, <mw>…);"
 ```
 
-`lib/constants.js` exposes `getPaths(root)` plus per-key getters (`basePath`,
-`modulesPath`, `sharedPath`, `prismaPath`, `typeormEntitiesPath`,
-`mongooseModelsPath`, `appRoutesPath`, `rootRoutesPath`, `validatorsPath`,
-`docsPath`) that delegate to `getPaths()` at access time. Destructure-at-load
-is deprecated; new code must go through getters or an explicit snapshot.
+Rules:
 
-### 4.3 Detect-first integration
+- `relRequireFromRoutes` is `../modules/<kebab>/routes/<kebab>.router.js`
+  (modular) or `../modules/<kebab>/<kebab>.router.js` (simple) — always
+  relative to `app/routes/index.js`.
+- `id` = `toIdentifier("<kebab>-router")` — never a raw user string.
+- A module whose router file is **missing on disk** lands in `skipped[]`
+  with a reason and is excluded from the emitted block: a dangling `require`
+  is structurally impossible.
+- `buildMiddlewareEntries(names, { root })` applies the same existence rule
+  to `app/shared/middlewares/<kebab>.middleware.js`.
+- `renderRouteLines` returns `""` for an empty entry list, so `integrate`
+  can report "no valid modules" without emitting an empty region.
 
-`lib/project/detector.js`'s `detectProject(root)` builds a structural summary
-that every integrating command consumes *before* writing anything:
+`lib/commands/integrate.js` composes the engine with
+`safety.buildRoutesContent(existing, routeLines)` and writes the result
+through the safety layer (`writeFileIfNotExistsSafe` on a fresh file,
+`overwriteWithBackup` otherwise), reporting
+`data.action ∈ created | markers-regenerated | block-injected | appended`.
 
-- npm presence, express version, installed ORMs, dependency map.
-- `app/modules/**` inventory with each module's real architecture (`modular`
-  when `<name>.router.js` exists under `routes/`, `simple` when a flat
-  `<name>.controller.js` exists) — mixed layouts are expected.
-- Main-router state: existing? contains the `rakitin:routes:start/end` markers?
-- Global middleware files (`*.middleware.js`) found in `app/shared/middlewares/`.
+`init`'s `ensureBaseRouter` uses the same pair
+(`buildRoutesContent(null, "")`), so a freshly created router and a
+regenerated one have identical structure.
 
-Consumers: `initCommand`, `integrateCommand`, `doctorCommand`, `infoCommand`,
-recipes. The rule: integrate what exists, skip what doesn't, never emit dangling
-requires (`integrate.js` checks middleware file existence ONCE before wiring).
+---
 
-### 4.4 Marker-based managed region for the router
+## 6. The safety layer (`lib/safety.js`)
 
-`lib/safety.js` defines:
+Every write in the codebase funnels through this module. It owns four
+guarantees.
 
-- `ROUTES_BLOCK_START` = `/* rakitin:routes:start */`
-- `ROUTES_BLOCK_END` = `/* rakitin:routes:end */`
+### 6.1 Modes
 
-`buildRoutesContent(existing, routeLines)` is a PURE function returning
-`{ content, action }` where `action ∈ {"create"|"inject"|"append"}`:
+| Mode | API | Effect |
+| --- | --- | --- |
+| dry-run / plan | `beginPlan()`, `resetPlan()`, `isDryRun()`, `getPlan()` | writes are recorded as `{op, path, backup?}` instead of hitting disk; `resetPlan()` clears the plan **and** leaves the mode (the v2 latched-dry-run bug) |
+| overwrite | `setOverwrite(bool)`, `isOverwrite()` | `writeFileIfNotExistsSafe` re-writes an existing file through `overwriteWithBackup` (`.bak` kept) instead of skipping it |
 
-| state of `app/routes/index.js` | behavior |
+### 6.2 Write helpers
+
+```js
+writeFileIfNotExistsSafe(filePath, content, {dryRun?, overwrite?})
+// -> { written, skipped: "exists"|null }     (delegates to overwriteWithBackup in overwrite mode)
+overwriteWithBackup(filePath, content, {dryRun?})
+// -> { written, backedUp, backupPath|null }
+backupPathFor(filePath)   // <file>.bak, then .bak.1, .bak.2, … (never clobbers)
+writeOutcome(verdict)     // -> "created" | "skipped"
+```
+
+`utils.ensureDir(dir)` is plan-aware too: in plan mode a missing directory is
+recorded as `{op:"mkdir", path}`.
+
+### 6.3 JSON mutation
+
+`updateJsonFile(filePath, mutator, {dryRun?})` is the **only** sanctioned way
+to mutate a user's JSON. It parses (rejecting non-objects and invalid JSON
+with an actionable error), applies `mutator(obj)`, treats `false`/`null`/
+`undefined` as "nothing changed" (no write, no backup), and otherwise
+re-serializes with `JSON.stringify(obj, null, 2) + "\n"` through
+`overwriteWithBackup`. Used by: `config set`, `recipe test` script
+injection, `plugin add/remove`.
+
+### 6.4 Env example merge
+
+`mergeEnvExample(root, marker, content, {dryRun?})` appends a
+`# <MARKER>` section to `<root>/.env.example` **at most once**: if a line
+equal to `# <MARKER>` already exists, it reports
+`{written:false, skipped:"marker-exists"}`. Markers are one per config kind
+(`# APP CONFIG`, `# JWT CONFIG`, `# CUSTOM:<NAME> CONFIG`, …), plus
+`# AUTH RECIPE`, `# API DOCS`, `# PRISMA`, `# SEQUELIZE`, `# MONGOOSE`,
+`# TYPEORM`. It replaced every raw `.env`/`.env.example` writer from v2.
+
+### 6.5 Marker engine
+
+`buildMarkedBlock({existing, startToken, endToken, inner, header,
+eofFallback, commentPrefix})` is a pure function returning
+`{content, action}`:
+
+| State | Action |
 | --- | --- |
-| absent (`existing == null`) | full header + marked block + export (`create`) |
-| present WITH markers | replace ONLY the marked region; bytes outside markers preserved (`inject`) |
-| present WITHOUT markers | append marked block (before `module.exports` when found) keeping user code above intact |
+| `existing == null` | `create` — `header` + region + `eofFallback` |
+| contains both tokens | `inject` — replace only the `[start…end]` slice |
+| no tokens, has `module.exports` | `inject` — insert the region before the last `module.exports` |
+| no tokens, no anchor | `append` — trimmed content + region at EOF |
 
-Writers then choose `writeFileIfNotExistsSafe(path, content)` for fresh creates
-or `overwriteWithBackup(path, content)` which snapshots the previous version to
-`<path>.bak`. Custom routes kept *outside* the markers survive regeneration by
-construction.
+Tokens (exported constants):
 
-### 4.5 Unified dependency manifest
+| Constant | Value |
+| --- | --- |
+| `ROUTES_BLOCK_START/END` | `/* rakitin:routes:start */` … `/* rakitin:routes:end */` |
+| `RESOURCE_BLOCK_START/END` | `// rakitin:resources:start` … `// rakitin:resources:end` |
+| `GRAPHQL_BLOCK_START/END` | `# rakitin:graphql:start` … `# rakitin:graphql:end` |
+| `WS_BLOCK_START/END` | `// rakitin:ws:start` … `// rakitin:ws:end` |
 
-Generators no longer shell their own installs. `lib/deps/manifest.js` maps
-generator kinds → packages their OUTPUT needs:
+`buildRoutesContent(existing, routeLines)` is `buildMarkedBlock` with the
+routes tokens, the express header, and `\nmodule.exports = router;\n` as the
+EOF fallback.
 
-```js
-KIND_DEPENDENCIES = {
-  "module:none": [],       // Express-only, basic tier
-  "module:prisma": [],     // handled by prisma init flow itself
-  "module:sequelize": ["sequelize", "mysql2"],
-  "middleware:auth": ["jsonwebtoken"],
-  ...
-};
-```
+### 6.6 The JSON envelope
 
-`resolvePackagesForKinds(kinds)` dedupes across kinds (reports unknown ones);
-`ensureDependencies(kinds, { silent, pm })` calls
-`installer.installIfNeeded(packages, { packageManager })` exactly once,
-skipping already-installed packages and detecting the package manager from
-lock files via `installer.getPackageManager()`. New generators register new
-kind keys here instead of installing inline (see docs/adding-generators.md §3).
-
-### 4.6 Dry-run first-class
-
-Dry-run is not a special flag handled per-command; it lives in the safety layer:
-
-- Global mode toggled by `safety.setDryRun(true)` / entered via
-  `bin/rakitin.js` calling `safety.beginPlan()`.
-- `writeFileIfNotExistsSafe(filePath, content, { dryRun })` and
-  `overwriteWithBackup(...)` accept per-call overrides so library callers can
-  opt in without touching global state.
-- In plan mode nothing touches disk; intents are appended to `runtime.plan`
-  as `{ op: "create" | "backup+overwrite", path }`.
-- Commands finish with `plan: ctx.dryRun ? safety.getPlan() : undefined`
-  handed to `printResult`, then `safety.resetPlan()` (also called on failure)
-  so state never leaks between runs. Tests may assert on plans directly using
-  `beginPlan()`/`getPlan()`/`resetPlan()`.
-
-Because content builders like `buildRoutesContent` are pure, router injection
-composes safely with dry-run.
+`printResult()` (in `lib/commands/shared.js`) is the single source of truth
+for output: JSON mode prints exactly one object
+(`{ok, created, skipped, plan?, nextSteps, message?, data?}`) with
+`created`/`skipped` relativized against `context.root`; human mode prints
+`📁 File yang dibuat`, `ℹ️  N file dilewati`, the dry-run plan, and a
+numbered `🧭 Next steps` block. Full contract in
+[cli-reference.md](./cli-reference.md#12-result-envelope-single-source-of-truth).
 
 ---
 
-## 5. Generator anatomy
+## 7. The template engine
 
-Every generator follows the same pipeline:
-
-```
-prompts OR flags
-      │  (headless: context from buildContext; interactive fallback
-      │   only when !context.yes — e.g. addModule's inquirer block)
-      ▼
-feature function  e.g. simpleArch(moduleName, orm) / createMiddleware(type)
-      │  1. validate inputs (validation-utils.validateModuleName etc.)
-      │  2. derive ALL names via naming.js (kebab dir, identifier, variants)
-      │  3. ensureDir(...) for conventional folders under getPaths().*
-      │  4. writes through writeFileIfNotExistsSafe / utils.writeFileIfNotExists
-      ▼
-manifest dependency registration
-      │  caller (command layer) does ensureDependencies([`${family}:${kind}`], { pm })
-      ▼
-nextSteps strings attached to result
-      │  e.g. "Wire module 'user' ke router utama: rakitin integrate"
-      ▼
-printResult renders human table or JSON object
-```
-
-### Why every generated identifier must come from `toIdentifier()`
-
-Generated source embeds user input as JavaScript identifiers:
-
-```js
-const ${toIdentifier(m + "-router")} = require('../modules/${kebab}/routes/${kebab}.router');
-```
-
-Raw interpolation breaks compilation the moment a user types something hostile:
-
-- `"user-profile"` → must become `userProfileRouter`, not `user-profileRouter`.
-- `"2fa"` → identifiers can't start with a digit; `toIdentifier` prefixes `_`.
-- `"class"`, `"await"`, `"function"` → reserved words; `toIdentifier` appends
-  `_` (using its internal `RESERVED_WORDS` set).
-- Spaces/punctuation → stripped entirely (`/[^A-Za-z0-9_$]/g`), never crashing
-  downstream require statements.
-
-`toIdentifier` also normalizes case (`camel` default, `pascal` option), and
-`naming.getModuleVariants()` exposes it alongside directory/file variants so a
-generator cannot accidentally mix an unsanitized variant into codegen. This is
-enforced twice: by review convention, and by regression suites that compile
-generated artifacts with `new vm.Script(source)` (§8).
-
----
-
-## 6. Template strategy: the EJS wrapper
-
-Templates currently ship mostly as inline literals inside generators (plus the
-self-contained auto-router template). The sanctioned rendering API is the EJS
-wrapper in `lib/template/engine.js`:
+`lib/template/engine.js` is a thin wrapper over EJS (the hand-rolled engine
+was removed because it could not compile multi-line templates):
 
 ```js
 const { TemplateEngine, renderTemplate, defaultEngine } = require("rakitin/template");
-// or directly: require(".../lib/template/engine")
-
-renderTemplate("<%= name %> = <%= value %>;", { name: "port", value: 3000 });
-
-const engine = new TemplateEngine({
-  enableCache: true,          // compiled fns cached (default true)
-  locals: { pkg: "rakitin" }, // fallback merged into every render's data
-  ejsOptions: {},             // forwarded verbatim to ejs.compile
-});
-const out = engine.renderFile("/abs/path/foo.ejs", { moduleName: "user" });
+defaultEngine.renderFile(absPath, locals);   // generator path
+renderTemplate("<%= name %>", { name: "x" }); // one-shot string render
 ```
 
-Capabilities:
+- `render(string, data)` compiles by **source** and caches the compiled fn.
+- `renderFile(path, data)` compiles by `${path}:${mtimeMs}` (edits invalidate
+  naturally) and bakes the absolute `filename` in so `include()` resolves
+  relative to the template regardless of cwd.
+- Locals: `{ ...engine.locals, ...data }` — render-time data wins.
+- Sync only (`async: false`); FIFO cache eviction at `maxCacheSize = 200`;
+  `clearCache()` and `cacheSize` for diagnostics.
+- Rendering failures are wrapped with the template path
+  (`Gagal merender template "<path>": <message>`).
 
-- **Interpolation** — `<%= value %>` escaped, `<%- value %>` raw.
-- **Control flow** — full JS via `<% if (...) { %> … <% } %>`, loops, ternaries.
-- **Includes** — `<%- include('./partial', { x: 1 }) %>`; for `renderFile` the
-  absolute `filename` is baked into the compiled function so include paths
-  resolve relative to the template regardless of process cwd (`render(string)`
-  has no filename context — prefer `renderFile` when using includes).
-- **Cache** — compiled fns cached by template *source* for `render`, and by
-  `${filePath}:${stat.mtimeMs}` for `renderFile` (mtime-stamped so edits
-  invalidate naturally). Sync execution only (`async: false`).
-- **Locals precedence** — render-time data spreads over constructor locals:
-  `{ ...this.locals, ...data }`.
-- **Eviction** — FIFO at `maxCacheSize = 200` (`_set` drops the oldest key);
-  `clearCache()` and the `cacheSize` getter exist for diagnostics/tests.
-
-### Migration guidance (inline literals → `.ejs`)
-
-New templating work should move toward files under `lib/templates/<area>/…ejs`
-rendered with `defaultEngine.renderFile`, rather than growing more backtick
-literals. Rules for migration:
-
-1. Keep *all* dynamic values flowing through explicit locals — no reading
-   `process.env` or filesystem inside templates.
-2. Any identifier interpolated into generated JS still must originate from
-   `toIdentifier()` in the generator, passed as a ready-to-use local.
-3. Convert one generator at a time; each conversion lands together with a
-   `vm.Script` compile assertion covering rendered output for representative
-   inputs (see the `vm.Script` rule in §7).
-4. Template filenames follow kebab-case (`orm-service.ejs`, `controller.ejs`);
-   partials live beside their consumers and are included relatively.
-5. Do not grow a second rendering mechanism — hand-rolled string engines were
-   removed precisely because they could not compile multi-line output. Until a
-   given literal migrates, it stays subject to the same `vm.Script` policy; the
-   wrapper simply becomes the standard tool going forward.
+Templates under `lib/templates/**` never read `process.env` or the
+filesystem; every dynamic value arrives as a local, and every identifier
+interpolated into generated JS is produced by `toIdentifier()` in the
+generator (see §8).
 
 ---
 
-## 7. Testing architecture
+## 8. Naming and identifier safety
 
-### Suite isolation: per-suite mkdtemp in `os.tmpdir`
+`lib/naming.js` is the only place case conversion and name validation happen.
 
-`tests/setup.js` (registered via jest.config's
-`setupFilesAfterEnv: ['<rootDir>/tests/setup.js']`) runs **once per test
-suite** (i.e. once per test file) and provisions a private sandbox:
+| Function | Purpose |
+| --- | --- |
+| `toPascalCase` / `toCamelCase` / `toKebabCase` / `toSnakeCase` / `toTitleCase` / `toConstantCase` | case converters |
+| `normalizeModuleName(name)` | cached kebab-case directory form; throws on empty |
+| `getModuleVariants(name)` | `{raw, kebab, pascal, camel, snake, constant, identifier}` in one call |
+| `toIdentifier(str, {casing})` | the ONLY sanctioned way to embed user input into generated JS: strips `[^A-Za-z0-9_$]`, prefixes `_` for a leading digit, appends `_` for reserved words |
+| `toSafeFileName(str)` | sanitized kebab file name |
+| `assertSafeName(kind, raw)` | ingress guard for every user name: rejects path separators, `\0-\x1f`, `.`/`..`/leading dots, and anything that does not reduce to `^[a-z0-9]+(?:-[a-z0-9]+)*$`; returns the kebab form |
+| `sanitizeFieldName` / `toFieldIdentifier` | JS-safe field identifiers for validators and query/body keys |
+
+`assertSafeName` is called at every ingress: `add module`,
+`add middleware` (+ `--custom-name`), `add config --custom-name`,
+`add util` custom name, `add endpoint` module + `--resource`,
+`add validation` name, `add graphql|websocket|test --module`, and
+`plugin add`.
+
+**Lazy paths.** `lib/constants.js` exposes `getPaths(root)` plus getters
+(`basePath`, `modulesPath`, `sharedPath`, `appRoutesPath`, `docsPath`,
+`prismaPath`) that resolve at **access** time. Destructuring a path at
+`require()` time is forbidden: tests override `process.cwd` after module
+load, and `--cwd` would otherwise target a stale root.
 
 ```js
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rakitin-test-"));
-global.tempDir = tempDir;
-process.cwd = () => tempDir;   // plain function, restored in afterAll
+const { getPaths } = require("../constants");
+const p = getPaths(root ?? process.cwd());   // GOOD — resolved at use time
+const { modulesPath } = require("../constants"); // BAD — frozen at load
 ```
-
-Rationale (from setup.js comments): sharing one directory across parallel Jest
-workers caused ENOENT races whenever one worker wiped contents while another
-scanned. `afterAll` removes the private tree; `afterEach` empties it between
-tests, clears mock call history (`jest.clearAllMocks()`), resets Logger
-instances (`Logger.clearInstances()`) and the util PathCache.
-
-### Why the cwd override is a plain function (not `jest.fn`)
-
-`jest.config.js` deliberately sets:
-
-```js
-clearMocks: true,     // wipes CALL HISTORY between tests…
-resetMocks: false,    // …but implementations are NOT reset globally
-restoreMocks: false,
-```
-
-Config comments explain: resetting implementations globally made factory-defined
-behavior vanish mid-suite and produced order-dependent failures. The inverse
-hazard applies to `process.cwd`: were it a Jest mock, any mock lifecycle that
-strips implementations would leave `cwd` returning `undefined` for the rest of
-the suite, breaking every lazy `getPaths()` lookup. Hence setup.js swaps in a
-*plain arrow function* — immune to mock bookkeeping — saving/restoring the
-original in `beforeAll`/`afterAll`.
-
-### Test layers
-
-| Layer | Location | Style |
-| --- | --- | --- |
-| Pure unit | `tests/unit/` (`naming.test.js`, `template.test.js`, `utils.test.js`, `config.test.js`, `logger.test.js`) | No fs needed (or tempDir only); verifies converters, cache eviction, EJS behavior. |
-| Library w/ internals stub | `tests/lib/installer.test.js` | Saves `installer.internals`, replaces `execCommand` / `isPackageInstalled` with local `jest.fn`s, restores in `afterAll`. No child processes, no network. |
-| Command & structure | `tests/lib/commands.test.js`, `constants.test.js`, `prompt.test.js`, `utils.test.js` | Real fs against `global.tempDir`; commands exercised through exported functions. |
-| Generator (disk-based, real fs) | `tests/lib/generator/*.test.js` (e.g. `arch.test.js`, `auto-router.test.js`, `config-router.test.js`) | Run generator → read produced files from tempDir → `vm.Script` them. |
-| Integration / end-to-end | `tests/integration/end-to-end.test.js` (+ `directory-structure`, `file-validation`) | Drives exported `main`/`run` from `index.js` (possible because of its `require.main` guard) or command APIs end-to-end inside tempDir. |
-| Regression policy gates | `tests/regression/p0-bugfixes.test.js`, `core-redesign.test.js`, `recipes.test.js` | Historical bug classes encoded as permanent assertions — every generated artifact below these tests is syntax-checked via `vm.Script`; structural promises (markers present, backups written, plans collected) verified. |
-
-### The `vm.Script` rule
-
-> Every artifact rakitin generates must parse standalone:
-> `expect(() => new vm.Script(source)).not.toThrow();`
-
-Where unparseable fragments occur on purpose (e.g. controllers whose top-level
-`require(...)` targets user-project files), suites strip requires first
-(`stripRequires` helper in `arch.test.js`) or substitute them
-(`src.replace(/require\([^)]*\)/g, "({})")` in `config-router.test.js`) so the
-*syntax* is still gated. Any new codegen path adds this check either inside
-`tests/regression/` or in a dedicated suite before merge. Run everything with
-`npx jest` (coverage collected by default per `jest.config.js`; `forceExit` is
-enabled because interactive prompt libs keep handles alive in some suites).
 
 ---
 
-## 8. Extension guide mini-map
+## 9. Dependency manifest & installer
 
-Adding a capability touches a predictable set of seams:
+`lib/deps/manifest.js` maps a generator **kind** to the packages its output
+requires:
 
-| Want to… | Go to | Notes |
-| --- | --- | --- |
-| Add a new headless generator | `docs/adding-generators.md` (full tutorial) | Non-interactive core fn + optional prompt wrapper. |
-| Make its output install packages | `lib/deps/manifest.js` `KIND_DEPENDENCIES` | Register e.g. `"service:prisma": [...]`; install via `ensureDependencies` — never inline installs. |
-| Expose it on the CLI | `bin/rakitin.js` dispatcher + `lib/commands/add.js` `addCommand` switch | Reuse `buildContext`/`enterProjectRoot`/`printResult`; do not bypass the safety layer. |
-| Wire new output into the router | `lib/safety.js` markers + `buildRoutesContent` | Only inject inside the managed region; identifiers via `toIdentifier`. |
-| Show it in `rakitin list` | `CATALOG` array in `lib/commands/info.js` | Tiers: basic / intermediate / advanced. |
-| Load user configuration | `lib/config/index.js` (`Config` class) | Exists and tested, but intentionally NOT yet consumed by the menu/command flow — wire deliberately if adoption is desired. |
-| Reuse path conventions | `getPaths(root)` from `lib/constants.js` | Never destructure at load time (§4.2). |
+```js
+KIND_DEPENDENCIES = {
+  "module:none": [], "module:prisma": ["@prisma/client", "prisma", "dotenv"],
+  "module:sequelize": ["sequelize", "mysql2"], "module:mongoose": ["mongoose"],
+  "module:typeorm": ["typeorm", "reflect-metadata"],
+  "middleware:auth": ["jsonwebtoken"], /* … */
+  "graphql:core": ["graphql", "graphql-http"], "websocket:ws": ["ws"],
+  "test:dev": ["jest@^29", "supertest"],  // DEV_KINDS -> devDependencies
+  "recipe:auth": ["jsonwebtoken", "joi", "bcryptjs"],
+};
+```
 
-Related docs: `docs/coding-standards.md` (style + invariants enforced during
-review) and `docs/router-integration.md` (marker deep-dive).
+- `resolvePackagesForKinds(kinds, extraKinds)` merges the registry with
+  plugin-contributed kinds, dedupes into `packages`/`devPackages`, and
+  reports `unknownKinds`.
+- `ensureDependencies(kinds, {pm, install, dev, silent, extraKinds, root})`
+  throws `Kind dependency tidak dikenal: "<kind>"` for an unknown kind,
+  returns early with everything in `skipped[]` when `install === false` or
+  the plan is active, and otherwise installs once per save-target group.
+- `ormToKind(orm)` maps `Prisma|prisma|…` → `module:*`; an unknown ORM
+  throws.
+
+`lib/installer.js` builds `{command, args}` per package manager and executes
+with `spawn(command, args, {shell: false, cwd, env, stdio})` — package specs
+are never interpolated into a shell string. Retries happen only for
+network/registry failures (`EAI_AGAIN|ETIMEDOUT|ECONNRESET|ENOTFOUND|429|5xx`);
+deterministic failures (`EACCES|ENOENT|EUSAGE|EPERM`) fail fast.
+`internals` exposes `spawn`, `execCommand`, `isPackageInstalled`,
+`installIfNeeded` as the single injectable seam for tests and for
+`init --express`. `getPackageManager(root)` detects from lock files
+(`pnpm-lock.yaml`, `yarn.lock`, `bun.lockb|bun.lock`, `package-lock.json`).
+
+---
+
+## 10. Plugin layer
+
+`lib/plugins/` is optional and lazy: `lib/commands/plugin-seam.js` resolves
+it defensively, and `info`/`doctor`/`list` degrade to a clean
+"belum tersedia" status when it is missing.
+
+```
+config (.rakitinrc.json#plugins)  →  loader.js  →  registry.js  →  plugins/index.js
+                                     resolve +      validate API v1   cached host:
+                                     require        + collect         getHooks,
+                                                                     getGenerators,
+                                                                     getExtraKinds,
+                                                                     buildPluginContext
+```
+
+- `loader.js#loadPlugins({root, config})` resolves each entry
+  (`require.resolve(entry, { paths: [root] })` for bare specifiers; relative
+  entries against the project root) and never throws: a broken entry becomes
+  an `errors[]` record.
+- `registry.js` validates the API v1 shape (`apiVersion === 1`, non-empty
+  `name`, generator `generate` functions, command `name` + `handler`,
+  hook functions, `dependencies` kind → package array), recording malformed
+  contributions as `errors[]` and skipping them. Generator ids default to a
+  `plugin:<id>` dependency kind.
+- `plugins/index.js` caches the registry per `root + declared plugin list`
+  and exposes `getHooks`, `getGenerators`, `getExtraKinds`,
+  `getPluginCommands`, `buildPluginContext`, `resetPlugins`.
+- Hooks fire from one place: `runWithPlugins` (`preGenerate` → command →
+  `postGenerate`, with `onError` on throw) and `runWithPluginInstall`
+  (`preInstall`/`postInstall` around `ensureDependencies`).
+- Plugin generators are reachable as `rakitin add <generator-id>`; a plugin
+  may not shadow a core id (`Generator "<id>" bentrok dengan generator
+  bawaan`). Plugin-declared kinds are merged into the install step through
+  `extraKinds`.
+
+Full authoring guide: [plugin-authoring.md](./plugin-authoring.md).
+
+---
+
+## 11. Test architecture
+
+Hermetic by construction (`jest.config.js` + `tests/setup.js`):
+
+- **Per-suite temp dir.** `tests/setup.js` creates
+  `fs.mkdtempSync(path.join(os.tmpdir(), "rakitin-test-"))`, exposes it as
+  `global.tempDir`, and overrides `process.cwd` with a **plain function**
+  (not `jest.fn`) returning it — `clearMocks: true` would otherwise strip a
+  mock's implementation and leave `cwd()` returning `undefined`.
+- **Repo integrity guard.** `package.json` and `package-lock.json` are
+  sha256-hashed in `beforeAll` and re-hashed in `afterAll`; a mismatch throws
+  `[hermetic] test run memodifikasi <file>`. `npm test` therefore leaves the
+  git tree clean.
+- **Child processes blocked.** `tests/setup.js` calls `jest.mock("child_process")`,
+  backed by `__mocks__/child_process.js`, which throws for
+  `exec/execSync/spawn/spawnSync`. E2E suites opt back in with
+  `global.__RAKITIN_REAL_CHILD_PROCESS__ = true` and always pass
+  `--no-install`. `installer.internals.execCommand`/`spawn` are stubbed in
+  `beforeEach` as the in-process seam.
+- **Disk-based behavior tests.** Generators run against the real fs inside
+  `global.tempDir`; generated JS is validated by compiling it
+  (`new vm.Script(src)`), never by `require()`-ing user-project files.
+
+CI (`.github/workflows/ci.yml`) runs the Jest matrix on Node 22.x and 24.x,
+then a `git diff --exit-code` tree-dirty gate, plus lint, typecheck, and a
+smoke job that asserts `--json` stdout purity with `jq -e .` and the
+dry-run zero-mutation guarantee (`md5sum` of the file list before/after,
+no `node_modules`).
+
+---
+
+## 12. Extension map
+
+| Want to… | Go to |
+| --- | --- |
+| Add a core generator | [adding-generators.md](./adding-generators.md) |
+| Make its output install packages | `KIND_DEPENDENCIES` in `lib/deps/manifest.js`; install via `ensureDependencies` — never inline |
+| Expose it on the CLI | `bin/rakitin.js` (declare the flags) + `lib/commands/add.js#addCommand` |
+| Ship a plugin instead | [plugin-authoring.md](./plugin-authoring.md) |
+| Wire output into the main router | `lib/generator/router/wiring.js` + `safety.buildRoutesContent` (§5) |
+| Add a new managed region | add tokens to `lib/safety.js` and use `buildMarkedBlock` |
+| Touch `package.json` / `.rakitinrc.json` | `safety.updateJsonFile` only (§6.3) |
+| Add env keys | `safety.mergeEnvExample` only (§6.4) |
+| Reuse path conventions | `getPaths(root)` at call time (§8) |
+| See it in `rakitin list` | the catalog is derived from the live registries — register the kind/architecture/template and it appears |
+
+Related docs: [cli-reference.md](./cli-reference.md),
+[integration-tiers.md](./integration-tiers.md),
+[coding-standards.md](./coding-standards.md),
+[module-examples.md](./module-examples.md).

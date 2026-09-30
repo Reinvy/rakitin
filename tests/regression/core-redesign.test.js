@@ -1,6 +1,6 @@
 /**
- * Fase 2 regression guards: project detector, safety layer (dry-run,
- * backups, marker injection), unified dependency manifest.
+ * Regression guards for the project detector, the safety layer
+ * (plan/dry-run/backup/JSON/env contract) and the unified dependency manifest.
  */
 const fs = require("fs-extra");
 const path = require("path");
@@ -48,6 +48,13 @@ describe("Project Detector", () => {
     expect(d.structure.mixedArchitectures).toBe(true);
     expect(d.packageManager).toBe("npm");
   });
+
+  test("a dangling symlink never aborts detection", () => {
+    const p = getPaths();
+    fs.ensureDirSync(p.modulesPath);
+    fs.symlinkSync(path.join(p.modulesPath, "missing-target"), path.join(p.modulesPath, "ghost"));
+    expect(() => detectProject(global.tempDir)).not.toThrow();
+  });
 });
 
 describe("Safety Layer", () => {
@@ -78,6 +85,19 @@ describe("Safety Layer", () => {
       expect(fs.readFileSync(target, "utf8")).toBe("b");
     });
 
+    test("REGRESSION: resetPlan clears the latched dry-run flag", () => {
+      safety.beginPlan();
+      expect(safety.isDryRun()).toBe(true);
+
+      safety.resetPlan();
+      expect(safety.isDryRun()).toBe(false);
+
+      const target = path.join(global.tempDir, "after-reset.js");
+      const res = safety.writeFileIfNotExistsSafe(target, "real");
+      expect(res.written).toBe(true);
+      expect(fs.existsSync(target)).toBe(true);
+    });
+
     test("REGRESSION: ensureDir does NOT leak folders during dry-run", () => {
       const utils = require("../../lib/utils");
       safety.beginPlan();
@@ -96,14 +116,58 @@ describe("Safety Layer", () => {
     });
   });
 
-  test("overwriteWithBackup preserves previous version as .bak", () => {
+  test("overwriteWithBackup preserves previous version and never clobbers .bak", () => {
     const target = path.join(global.tempDir, "with-backup.js");
     fs.outputFileSync(target, "v1");
 
-    const res = safety.overwriteWithBackup(target, "v2");
-    expect(res.backedUp).toBe(true);
+    const first = safety.overwriteWithBackup(target, "v2");
+    expect(first.backedUp).toBe(true);
     expect(fs.readFileSync(`${target}.bak`, "utf8")).toBe("v1");
     expect(fs.readFileSync(target, "utf8")).toBe("v2");
+
+    const second = safety.overwriteWithBackup(target, "v3");
+    expect(fs.readFileSync(`${target}.bak`, "utf8")).toBe("v1"); // untouched
+    expect(fs.readFileSync(`${target}.bak.1`, "utf8")).toBe("v2");
+    expect(fs.readFileSync(target, "utf8")).toBe("v3");
+    expect(second.backupPath).toBe(`${target}.bak.1`);
+  });
+
+  test("updateJsonFile mutates through the safety layer with a backup", () => {
+    const target = path.join(global.tempDir, "package.json");
+    fs.outputJsonSync(target, { name: "demo", scripts: {} });
+
+    const res = safety.updateJsonFile(target, (pkg) => ({
+      ...pkg,
+      scripts: { ...pkg.scripts, test: "jest" },
+    }));
+
+    expect(res.written).toBe(true);
+    expect(JSON.parse(fs.readFileSync(target, "utf8")).scripts.test).toBe("jest");
+    expect(JSON.parse(fs.readFileSync(`${target}.bak`, "utf8")).scripts).toEqual({});
+  });
+
+  test("updateJsonFile plans (no write) under dry-run", () => {
+    const target = path.join(global.tempDir, "dry-package.json");
+    fs.outputJsonSync(target, { name: "dry" });
+    safety.beginPlan();
+
+    safety.updateJsonFile(target, (pkg) => ({ ...pkg, extra: true }));
+
+    expect(JSON.parse(fs.readFileSync(target, "utf8")).extra).toBeUndefined();
+    expect(safety.getPlan().some((entry) => entry.op === "overwrite")).toBe(true);
+  });
+
+  test("mergeEnvExample appends a marked section exactly once", () => {
+    const first = safety.mergeEnvExample(global.tempDir, "JWT CONFIG", "JWT_SECRET=x");
+    expect(first.written).toBe(true);
+
+    const second = safety.mergeEnvExample(global.tempDir, "JWT CONFIG", "JWT_SECRET=x");
+    expect(second.written).toBe(false);
+    expect(second.skipped).toBe("marker-exists");
+
+    const env = fs.readFileSync(path.join(global.tempDir, ".env.example"), "utf8");
+    expect(env.match(/# JWT CONFIG/g)).toHaveLength(1);
+    expect(env).toContain("JWT_SECRET=x");
   });
 });
 
@@ -127,8 +191,7 @@ describe("buildRoutesContent (marker injection)", () => {
     ].join("\n");
 
     const first = safety.buildRoutesContent(null, ROUTE_LINES).content;
-    // Simulate a user editing INSIDE nothing special, adding their own
-    // routes BEFORE the marked block:
+    // Simulate a user editing BEFORE the marked block:
     const editedByUser = first.replace(
       safety.ROUTES_BLOCK_START,
       `${userCode}\n${safety.ROUTES_BLOCK_START}`
@@ -140,15 +203,13 @@ describe("buildRoutesContent (marker injection)", () => {
     );
 
     expect(secondPass.action).toBe("inject");
-    // User routes preserved exactly once
     expect(secondPass.content.match(/MY PRECIOUS CUSTOM ROUTES/g)).toHaveLength(1);
     expect(secondPass.content).toContain("router.get('/health'");
-    // Managed block replaced
     expect(secondPass.content).toContain("/new-module");
-    expect(secondPass.content).not.toContain('/user-profile", userProfileRouter');
+    expect(secondPass.content).not.toContain("'/user-profile', userProfileRouter");
   });
 
-  test("marker-less legacy routers get appended without loss", () => {
+  test("marker-less legacy routers get injected without loss", () => {
     const legacy =
       "const express = require('express');\nconst r = 1;\nmodule.exports = r;\n";
     const { content, action } = safety.buildRoutesContent(legacy, ROUTE_LINES);
@@ -174,14 +235,22 @@ describe("buildRoutesContent (marker injection)", () => {
 
 describe("Dependency Manifest", () => {
   test("resolves unique packages across kinds", () => {
-    const { packages, unknownKinds } = manifest.resolvePackagesForKinds([
+    const { packages, devPackages, unknownKinds } = manifest.resolvePackagesForKinds([
       "middleware:auth",
       "middleware:auth",
       "validation:joi",
     ]);
 
     expect(packages.sort()).toEqual(["joi", "jsonwebtoken"]);
+    expect(devPackages).toEqual([]);
     expect(unknownKinds).toEqual([]);
+  });
+
+  test("dev kinds land in devPackages", () => {
+    expect(manifest.DEV_KINDS.has("test:dev")).toBe(true);
+    const { packages, devPackages } = manifest.resolvePackagesForKinds(["test:dev"]);
+    expect(packages).toEqual([]);
+    expect(devPackages.sort()).toEqual(["jest@^29", "supertest"]);
   });
 
   test("reports unknown kinds instead of crashing", () => {
@@ -190,15 +259,30 @@ describe("Dependency Manifest", () => {
     expect(unknownKinds).toEqual(["made-up-kind"]);
   });
 
-  test("ormToKind bridges ORM display names", () => {
+  test("ormToKind bridges ORM names and rejects unknown ones", () => {
     expect(manifest.ormToKind("Prisma")).toBe("module:prisma");
     expect(manifest.ormToKind("Mongoose")).toBe("module:mongoose");
-    expect(manifest.ormToKind("Unknown")).toBe("module:none");
+    expect(manifest.ormToKind("none")).toBe("module:none");
+    expect(() => manifest.ormToKind("Unknown")).toThrow(/ORM tidak dikenal/);
+  });
+
+  test("ensureDependencies is a no-op when install is false", async () => {
+    const result = await manifest.ensureDependencies(["module:mongoose"], {
+      install: false,
+    });
+    expect(result).toEqual({ success: true, installed: [], skipped: ["mongoose"], failed: [] });
+  });
+
+  test("ensureDependencies throws on an unknown kind", async () => {
+    await expect(
+      manifest.ensureDependencies(["made-up-kind"], { install: false })
+    ).rejects.toThrow(/Kind dependency tidak dikenal/);
   });
 
   test("resolves prisma packages for module:prisma kind", () => {
     const { packages } = manifest.resolvePackagesForKinds(["module:prisma"]);
     expect(packages).toContain("@prisma/client");
     expect(packages).toContain("prisma");
+    expect(packages).toContain("dotenv");
   });
 });

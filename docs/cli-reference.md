@@ -1,624 +1,852 @@
-# CLI Reference — rakitin 2.0.0
+# CLI Reference — rakitin v3
 
-Authoritative reference for every command surface shipped by the CLI
-(`bin/rakitin.js`, `lib/commands/*`, `lib/safety.js`,
-`lib/deps/manifest.js`). rakitin is **integration-first**: it detects your
-existing Node.js/Express project (`engines.node >= 18`), never clobbers
-user files without a `.bak` backup, and manages main-router wiring through
-idempotent marker blocks.
+Authoritative reference for every surface shipped by the CLI. Grounded in
+`bin/rakitin.js` (flag declarations), `lib/commands/*` (behavior),
+`lib/safety.js` (write/dry-run guarantees) and `lib/deps/manifest.js`
+(dependency registry).
 
-### 1. Synopsis & exit-code philosophy
+rakitin is **integration-first**: it detects the existing project, never
+clobbers user files without a `.bak` backup, and manages every generated
+region through idempotent markers. Runtime baseline: Node
+`^22.13.0 || >=23.5.0`, CommonJS only.
+
+---
+
+## 1. Synopsis
 
 ```
-rakitin                                # bare → interactive menu
-rakitin init                           # wizard / headless init + write .rakitinrc.json
-rakitin config [get|set|list]          # view or update configuration
-rakitin add <thing> [name]             # module|middleware|util|config|endpoint|validation|docs
-rakitin recipe <name>                  # auth|swagger|test|docker
-rakitin integrate                      # marker-based router wiring
+rakitin                                # bare → project summary + next steps (exit 0)
+rakitin init                           # write .rakitinrc.json + base router/ORM scaffolding
+rakitin config [list|get|set] [key] [value]
+rakitin add <thing> [name]             # module|middleware|util|config|endpoint|
+                                       #   validation|docs|test|graphql|websocket
+rakitin recipe <auth|swagger|test|docker>
+rakitin integrate                      # marker-based main-router wiring
+rakitin plugin <list|add|remove|info> [spec]
 rakitin info | doctor | list           # introspection
-rakitin router                         # [legacy] interactive router integration
+rakitin --cli-version                  # print the rakitin version, exit 0
 ```
 
-* Exit `0` on success — including dry-runs and “everything already existed”.
-* Exit `1` on failure — every thrown error is caught by `fail()`, which
-  prints `❌ Terjadi error:` (human) or `{ok:false,error}` (JSON).
-* Unknown commands fail via yargs validation (exit `1`).
+Every command runs through the same wrapper (`run()` in `bin/rakitin.js`):
+it builds the context from the global flags, applies `--cwd` exactly once,
+opens the dry-run plan when `--dry-run` is set, runs the command, and prints
+one result envelope.
 
-**`--json` contract** (also enabled by env `RAKITIN_JSON=1`; silences the
-internal logger): result-routed commands print a single machine object —
+### 1.1 Exit codes
+
+| Situation | Exit |
+| --- | --- |
+| Command completed (including no-op and `--dry-run`) | `0` |
+| Any thrown error → `{ok:false, error}` (JSON) or a `❌` log line (human) | `1` |
+| `integrate` with zero valid modules | `0` — the envelope carries `ok:false` plus a guidance `message`; it is a hint, not a crash |
+
+### 1.2 Result envelope (single source of truth)
+
+`printResult()` in `lib/commands/shared.js` is the only writer of command
+results. In JSON mode (`--json`, or the env var `RAKITIN_JSON=1`) stdout
+contains **exactly one** JSON object:
 
 ```json
 {
   "ok": true,
-  "created": ["app/modules/user/user.controller.js"],
+  "created": ["app/modules/user/controllers/user.controller.js"],
   "skipped": [],
-  "plan": [{ "op": "create", "path": "/abs/path" }],
-  "nextSteps": ["Wire module 'user' ke router utama: rakitin integrate"]
+  "plan": [{ "op": "create", "path": "/abs/path/user.controller.js" }],
+  "nextSteps": ["Module 'user' otomatis terhubung di app/routes/index.js"],
+  "message": "optional human/agent-readable sentence",
+  "data": { "command-specific": "payload" }
 }
 ```
 
-* Always present: `ok`, `created[]`, `skipped[]`, `nextSteps[]`.
-  `plan[]` only under `--dry-run`; entries are `{op, path}` with
-  `op ∈ {create, backup+overwrite}`.
-* Errors: `{ok:false, error:"<message>"}` + exit `1`.
-* Purely interactive subcommands (`add endpoint`, `add validation`,
-  `add docs`, `add util`, legacy `router`) still emit prompt UI text, so
-  stdout purity is guaranteed only for fully flag-specified headless runs;
-  `info` always prints its summary JSON while `doctor`/`list` stay
-  human-text.
+| Key | Always present | Shape |
+| --- | --- | --- |
+| `ok` | yes | `true` unless the command reports a non-fatal problem |
+| `created[]` | yes | POSIX paths **relative to the project root** |
+| `skipped[]` | yes | POSIX paths relative to the project root (file already existed / marker already present / nothing changed) |
+| `plan[]` | only under `--dry-run` | `{op, path}` entries, `path` **absolute**; see §1.4 |
+| `nextSteps[]` | yes | strings, rendered as a numbered block in human mode |
+| `message` | when the command has one | string |
+| `data` | when the command has one | command-specific object |
 
-Payload by command: `init`/`add *`/`recipe *`/`integrate` emit the
-printResult object; `info` the raw unwrapped `summary`; `doctor` and
-`list` none. Human mode prints `📁 File yang dibuat:` / dry-run plan
-listings plus a
-numbered `🧭 Next steps:` block.
+Failures print `{ "ok": false, "error": "<message>" }` and exit `1`.
 
-## 2. Global flags
+**stdout purity.** Under JSON mode the logger is switched to `silent`
+(`enableJsonMode()`), and no module under `lib/**` writes to the console
+except `lib/utils/logger.js` (enforced by an ESLint `no-console` rule scoped
+to `lib/**`). Diagnostics therefore never corrupt a `jq`-parsed stdout.
 
-| Flag | Alias | Type | Meaning |
-| --- | --- | --- | --- |
-| `--cwd <dir>` | – | string | Project root; the CLI chdirs there first |
-| `--yes` | `-y` | boolean | Assume defaults, skip fill-in prompts |
-| `--overwrite` | `-o` | boolean | Controlled overwrite (`.bak` created) |
-| `--dry-run` | – | boolean | Show plan without writing files |
-| `--json` | – | boolean | Machine-readable stdout |
-| `--no-install` | – | boolean | Skip automatic dependency installs |
-| `--preset <p>` | – | enum | `basic\|intermediate\|advanced` |
-| `--arch <a>` | – | enum | `simple\|modular` |
-| `--orm <o>` | – | enum | `none\|prisma\|sequelize\|mongoose\|typeorm` |
-| `--pm <m>` | – | enum | `npm\|pnpm\|yarn\|bun` |
-| `--middleware <list>` | – | string | Comma-separated middlewares |
+### 1.3 Dry-run guarantee
 
-### Which command honors what
+`--dry-run` opens the safety-layer plan (`safety.beginPlan()`). While the
+plan is active:
 
-| Flag | init | config | add module | add mw/util/config/endp/valid/docs | recipe * | integrate |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| `--cwd` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `--yes/-y` | ✅ | ✅ | ✅ skips prompts¹ | mw custom name only | – | – |
-| `--overwrite/-o` | ✅ regenerates rc | – | –² | –² | –² | – |
-| `--dry-run` | – (writes anyway) | – | ✅ | ✅ | ✅ | ✅ |
-| `--json` | ✅ | ✅ | ✅³ | ✅³ | ✅ | ✅ |
-| `--no-install` | ✅ | – | ✅ | mw only | –⁴ | – |
-| `--preset` | ✅ | – | – | – | – | – |
-| `--arch` | ✅ | – | ✅ | – | `recipe auth` | – |
-| `--orm` | ✅ | – | ✅ | – | – | – |
-| `--pm` | ✅ | – | ✅ deps | – | auth/swagger/test installs | – |
-| `--middleware csv` | – | – | – | – | – | ✅ |
+- **No filesystem mutation of any kind.** `writeFileIfNotExistsSafe`,
+  `overwriteWithBackup`, `updateJsonFile`, `mergeEnvExample` and
+  `utils.ensureDir` only record intent.
+- **No install/generation child process.** `ensureDependencies` returns early
+  with every package in `skipped[]`; `init --express` records
+  `{op:"install", path:"npx express-generator --no-view ."}` instead of
+  running `npx`.
+- `created[]` **mirrors the planned creates**: it lists the same paths the
+  plan would create, so a dry-run result is directly comparable with the real
+  run's result.
 
-¹ Without a positional name, `--yes` is rejected (“Nama modul wajib ada”).
-² File generation primitives are write-if-absent; existing files surface in
-`skipped[]` instead of being replaced (router replacement goes through
-markers + `.bak`, not this flag). ³ Interactive flows still print prompt UI.
-⁴ Recipes run their own install steps regardless of `--no-install`.
+Verified on a throwaway project: running `add module … --dry-run`,
+`add middleware auth --dry-run`, `recipe auth --dry-run`,
+`init --orm prisma --dry-run` and `recipe test --dry-run` leaves
+`find . -type f | md5sum` unchanged and creates no `node_modules/`.
+
+### 1.4 Plan entry shapes
+
+| `op` | Emitted by | Extra fields |
+| --- | --- | --- |
+| `create` | `writeFileIfNotExistsSafe` on an absent path | — |
+| `overwrite` | `overwriteWithBackup` on an existing path | `backup` — absolute path of the `.bak` that will be written |
+| `mkdir` | `utils.ensureDir` for an absent directory | — |
+| `install` | `init --express` (dry-run only) | `path` holds the recorded command string |
+
+Example (`recipe test --dry-run`), showing both `create` and `overwrite`:
+
+```json
+"plan": [
+  { "op": "create", "path": "/tmp/p/jest.config.js" },
+  { "op": "create", "path": "/tmp/p/tests/setup.js" },
+  { "op": "overwrite", "path": "/tmp/p/package.json", "backup": "/tmp/p/package.json.bak" }
+]
+```
 
 ---
 
-## 3. Command reference
+## 2. Global flags
 
-### 3.1 `rakitin init`
+Declared once on the yargs instance (`bin/rakitin.js`), so every command
+accepts them.
 
-Inisialisasi proyek, scaffolding Express generator baru (opsional), setup database dasar, dan konfigurasi `.rakitinrc.json`.
+| Flag | Alias | Type | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `--cwd <dir>` | – | string | `process.cwd()` | Project root. Applied exactly once (`enterProjectRoot`); every lazy path helper then agrees. |
+| `--yes` | `-y` | boolean | `false` | Non-interactive: use defaults, never prompt. |
+| `--overwrite` | `-o` | boolean | `false` | Re-write files that already exist, always keeping the previous content in a `.bak` backup. Without it, existing files are skipped and reported in `skipped[]`. See §2.2. |
+| `--dry-run` | – | boolean | `false` | Plan only; nothing is written and nothing is spawned. |
+| `--json` | – | boolean | `false` | Machine-readable stdout (also via `RAKITIN_JSON=1`). |
+| `--no-install` | – | boolean | installs **on** | Declared as `--install` with `default: true`; `--no-install` skips every dependency install. |
+| `--auto-integrate` / `--no-auto-integrate` | – | boolean | `true` (or rc value) | Whether `add module` wires the new module into `app/routes/index.js`. |
+| `--preset <p>` | – | enum | auto-detected | `basic` \| `intermediate` \| `advanced`. |
+| `--arch <a>` | – | enum | `modular` (or rc value) | `simple` \| `modular`. |
+| `--orm <o>` | – | enum | see §2.1 | `none` \| `prisma` \| `sequelize` \| `mongoose` \| `typeorm`. |
+| `--pm <m>` | – | enum | detected from lockfile | `npm` \| `pnpm` \| `yarn` \| `bun`. |
+| `--middleware <csv>` | – | string | – | Comma-separated middleware names for `integrate`. |
+| `--cli-version` | – | boolean | – | Print the version and exit 0 (`--version` is deliberately unbound: `.version(false)`, so `--api-version` and `--version`-like flags stay free). |
+
+### 2.1 Preset and ORM resolution
+
+`buildContext()` resolves, in order:
+
+1. `preset` = `--preset` → `.rakitinrc.json#preset` → auto-detect.
+   Auto-detect: an installed ORM, or `--orm`, or a configured ORM ⇒
+   `intermediate`; otherwise `basic`.
+2. `orm` = `--orm` → configured `orm` → `none` when the preset is `basic`,
+   else `prisma`.
+3. `arch` = `--arch` → configured `arch` → `modular`.
+4. `generateValidationLayer` = rc value → `preset !== "basic"`.
+5. `generateTestFiles` = rc value → `preset === "advanced"`.
+6. `pm` = `--pm` → configured `packageManager` → lockfile detection.
+
+An unknown preset throws
+`Preset tidak dikenal: "<p>". Pilih salah satu: basic, intermediate, advanced.`
+
+### 2.2 `--overwrite` semantics
+
+`--overwrite`/`-o` turns every generated write into a **controlled
+re-write**: `bin/rakitin.js` calls `safety.setOverwrite(context.overwrite)`
+on each run, and `writeFileIfNotExistsSafe` then routes an existing path
+through `overwriteWithBackup`, so the previous content is preserved in
+`.bak` (then `.bak.1`, `.bak.2`, … — never clobbered).
+
+| Without `--overwrite` | With `--overwrite` |
+| --- | --- |
+| an existing file is left untouched and reported in `skipped[]` | the file is re-written and reported in `created[]`; the previous bytes live in `<file>.bak` |
+| new files are created normally | new files are created normally |
+
+It applies to every command that writes generated files. Independently of
+the flag:
+
+- managed regions (main router, module router resource blocks, GraphQL SDL,
+  WebSocket registry) are **always** regenerated in place with a `.bak`;
+- JSON files (`package.json`, `.rakitinrc.json`) are only ever mutated
+  through `updateJsonFile` (parse → mutate → `.bak`);
+- `init --force/-f` is the flag that regenerates an existing
+  `.rakitinrc.json` (keeping any `plugins` array) with a `.bak`.
+
+Under `--dry-run` an overwrite is recorded as
+`{op:"overwrite", path, backup}` and nothing is written.
+
+### 2.3 Per-command flag support
+
+| Command | `--cwd` | `--yes` | `--dry-run` | `--json` | `--no-install` | `--pm` | `--overwrite` |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| *(bare `$0`)* | ✅ | n/a | ✅ (empty plan) | ✅ | n/a | n/a | n/a |
+| `init` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (+ `--force` for the rc) |
+| `config list/get/set` | ✅ | n/a (never prompts) | ✅ (`set`) | ✅ | n/a | n/a | n/a (`set` always writes with a `.bak`) |
+| `add module` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add middleware` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add util` | ✅ | n/a (never prompts) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add config` | ✅ | n/a (never prompts) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add endpoint` | ✅ | ✅ | ✅ | ✅ | n/a (no deps) | n/a | ✅ |
+| `add validation` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add docs` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add test` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add graphql` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add websocket` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `recipe auth` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `recipe swagger` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `recipe test` | ✅ | n/a | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `recipe docker` | ✅ | n/a | ✅ | ✅ | n/a (no deps) | n/a | ✅ |
+| `integrate` | ✅ | n/a | ✅ | ✅ | n/a | n/a | n/a (always regenerates the region with a `.bak`) |
+| `plugin list/add/remove/info` | ✅ | n/a | ✅ (`add`/`remove`) | ✅ | n/a | n/a | n/a (config merge is idempotent) |
+| `info` / `doctor` / `list` | ✅ | n/a | n/a (read-only) | ✅ | n/a | n/a | n/a |
+
+“n/a (never prompts)” = the command is flag-complete; `--yes` changes
+nothing. `add module` and `add middleware` are the only commands with an
+interactive fallback, and it is only reached when the required positional
+argument is missing **and** `--yes` is not set.
+
+---
+
+## 3. Commands
+
+### 3.1 bare `$0` — project summary
 
 ```bash
-# Synopsis
-rakitin init [--express] [--arch modular|simple] [--orm prisma|sequelize|mongoose|typeorm|none] \
-    [--pm npm|pnpm|yarn|bun] [--auto-integrate] [--preset basic|intermediate|advanced] \
-    [--overwrite] [--cwd DIR] [--yes] [--json]
+rakitin [--cwd DIR] [--json]
+```
+
+Prints a detected-project summary (root, package name + manager, Express
+version, Node engine, module counts, installed ORMs, config file + preset,
+router path + marker state, available middlewares, resolved rakitin flags,
+plugin load errors) followed by a numbered next-step block. Non-interactive;
+never writes; exit 0.
+
+```bash
+rakitin
+rakitin --json | jq '.data.summary.router'
+```
+
+### 3.2 `init`
+
+```bash
+rakitin init [--express] [--preset basic|intermediate|advanced]
+             [--orm none|prisma|sequelize|mongoose|typeorm]
+             [--arch simple|modular] [--pm npm|pnpm|yarn|bun]
+             [--auto-integrate|--no-auto-integrate] [--force|-f]
 ```
 
 | Option | Effect |
 | --- | --- |
-| `--express` | Generate project Express baru dari awal menggunakan `npx express-generator --no-view` dan menghubungkan `app.js` ke `/api`. |
-| `--arch` | Set arsitektur proyek default (`modular` atau `simple`). |
-| `--orm` | Set ORM/Database proyek default (`prisma`, `sequelize`, `mongoose`, `typeorm`, `none`). |
-| `--pm` | Set package manager yang digunakan (`npm`, `pnpm`, `yarn`, `bun`). |
-| `--auto-integrate` | Aktifkan integrasi otomatis modul baru ke `app/routes/index.js` (default: `true`). |
-| `--preset` | Force preset; unknown values abort. Omitted ⇒ auto-preset: any ORM installed ⇒ `intermediate`, else `basic`. |
-| `--overwrite/-o` / `--force/-f` | Regenerasi konfigurasi dan file base meskipun sudah ada. |
-| `--json` | Standard output object JSON. |
+| `--express` | Scaffold a fresh Express project with `npx express-generator --no-view --force .`, then install its dependencies (skipped under `--no-install`) and wire `app.js` to mount `./app/routes` at `/api`. Ignored with a warning when Express is already detected. |
+| `--preset` | Pin the preset. `basic` ⇒ `orm: none`, validation layer off, no test files. `intermediate` ⇒ ORM on (default `prisma`), validation layer on. `advanced` ⇒ intermediate + test files. |
+| `--orm` / `--arch` / `--pm` | Written into `.rakitinrc.json` and used for base scaffolding. |
+| `--auto-integrate` / `--no-auto-integrate` | Stored as `autoIntegrateRouter`. |
+| `--force` / `-f` | Regenerate an existing `.rakitinrc.json` (`.bak`-backed). Without it, an existing config is reused and reported in `skipped[]`. |
+| `--no-install` | Skip the ORM dependency install. |
+| `--dry-run` | Record the plan; the express-generator invocation becomes an `install` plan entry. |
 
-Behavior:
-* Mode Interaktif (TTY): Menampilkan wizard pemilihan project Express dari awal, arsitektur, ORM, package manager, dan router auto-integrate.
-* Mode Headless / Flags: Melewati wizard dan langsung menulis konfigurasi sesuai flags.
-* Menyiapkan base router (`app/routes/index.js`) dan database connection singleton (`app/shared/config/db.js` atau `data-source.js` / Prisma base schema).
+Writes `.rakitinrc.json` (with `$schema`, `version: 3`, preset/arch/orm/pm,
+the three booleans, and the preserved `plugins` array), the base router
+`app/routes/index.js` (marker region), and the base ORM scaffolding:
 
-```bash
-rakitin init                                                    # interactive wizard
-rakitin init --express --arch modular --orm prisma --pm npm     # express generator scaffold
-rakitin init --orm sequelize --arch simple --yes                # non-interactive headless init
-rakitin init --preset advanced --overwrite                      # explicit, regenerating
-```
-
-### 3.2 `rakitin config`
-
-Lihat atau ubah konfigurasi `.rakitinrc.json` proyek.
+| ORM | Base artifacts |
+| --- | --- |
+| `prisma` | `prisma/schema/base.prisma`, `prisma.config.js`, `app/shared/config/db.js`, `.env.example` (`# PRISMA` → `DATABASE_URL=…`) |
+| `sequelize` | `app/shared/config/database.js`, `.env.example` (`# SEQUELIZE` → `DB_*`) |
+| `mongoose` | `app/shared/config/db.js`, `.env.example` (`# MONGOOSE` → `MONGODB_URI`) |
+| `typeorm` | `app/shared/config/data-source.js`, `.env.example` (`# TYPEORM` env) |
+| `none` | nothing beyond the router |
 
 ```bash
-# Synopsis
-rakitin config [list|get|set|interactive] [key] [value] [--json]
+rakitin init --preset intermediate --orm prisma --pm npm
+rakitin init --express --arch modular --orm none
+rakitin init --orm prisma --dry-run --json | jq '.plan[].op'
+rakitin init --force                       # regenerate .rakitinrc.json (+ .bak)
 ```
 
-| Subcommand | Usage | Description |
-| --- | --- | --- |
-| `rakitin config` / `list` | `rakitin config list` | Tampilkan seluruh konfigurasi aktif dalam format tabel atau JSON. |
-| `rakitin config get <key>` | `rakitin config get orm` | Ambil nilai konfigurasi tertentu (mendukung alias: `arch`, `pm`, dll.). |
-| `rakitin config set <key> <value>` | `rakitin config set orm mongoose` | Ubah nilai konfigurasi secara langsung di `.rakitinrc.json`. |
+### 3.3 `config [action] [key] [value]`
+
+```bash
+rakitin config [list]                 # every resolved value
+rakitin config get <key>              # one resolved value
+rakitin config set <key> <value>      # mutate .rakitinrc.json
+```
+
+Actions: `list` (default), `get`, `set`. Unknown action ⇒ exit 1 with the
+action list. Keys are restricted to the v3 schema
+(`version, preset, arch, orm, packageManager, autoIntegrateRouter,
+generateValidationLayer, generateTestFiles, plugins`); an unknown key throws
+`Kunci config tidak dikenal: "<key>". Pilihan: …`.
+
+Values are coerced to the schema type: `version` must be `3`; enum keys are
+validated against their domain; booleans accept `true|1|yes|y` /
+`false|0|no|n`; `plugins` accepts a JSON array (`'["a","./b.js"]'`) or a
+comma list. `set` writes through `updateJsonFile` (backup + plan-aware) and
+reports the file in `created[]`, or in `skipped[]` when the value was
+already set. `list`/`get` never write.
+
+`config list` also reports the detected project (`data.project`), and in
+human mode renders a table; under `--json` it emits only the envelope.
 
 ```bash
 rakitin config list
 rakitin config get orm
 rakitin config set orm mongoose
-rakitin config set defaultArchitecture simple
 rakitin config set autoIntegrateRouter false
+rakitin config set plugins '["rakitin-plugin-audit","./plugins/x.js"]'
+rakitin config set arch simple --dry-run --json | jq '.plan'
 ```
 
-### 3.3 `rakitin add module <name>`
-
-Full feature module; headless-first, remaining decisions prompted unless
-`--yes`.
+### 3.4 `add module <name>`
 
 ```bash
-rakitin add module <name> [--arch simple|modular] \
-    [--orm none|prisma|sequelize|mongoose|typeorm] \
-    [--pm npm|pnpm|yarn|bun] [--no-install] [--yes] [--dry-run] [--json]
+rakitin add module <name> [--arch simple|modular]
+    [--orm none|prisma|sequelize|mongoose|typeorm]
+    [--template crud|readonly|graphql|realtime]
+    [--with-tests] [--pm PM] [--no-install] [--yes] [--dry-run] [--json]
 ```
 
-Options: `<name>` normalized to kebab-case directories (`User Profile` →
-`user-profile`) and required even under `--yes`; `--arch` default
-`modular`; `--orm` defaults to configured project ORM or `prisma`; missing flags trigger the fill-in
-prompts keyed `moduleName` → `architecture` (Simple|Modular) → `useORM`
-(confirm, default true) → `ormChoice` (Prisma|Sequelize|Mongoose|TypeORM|None).
+`<name>` is required. Without it (and without `--yes`) the command prompts;
+with `--yes` and no name it exits 1 with a copy-pasteable example. Names go
+through `assertSafeName("module", …)`: path separators, `.`/`..`, leading
+dots and control characters are rejected with
+`Nama module tidak valid: "<raw>". Gunakan huruf, angka, "-" atau "_" tanpa
+pemisah path.`; accepted names are normalized to kebab-case
+(`UserProfile` → `user-profile`).
 
-Behavior:
+Artifacts:
 
-* Writes flow through the safety layer — existing files land in
-  `skipped[]`, never overwritten.
-* Manifest-driven installs: `--orm mongoose` installs exactly `mongoose`;
-  `--orm none` installs nothing; Express is never installed by rakitin.
-* ORM services target conventional paths (`../../models/<kebab>.model`,
-  `../../config/db`, …); the no-ORM service embeds an in-memory store
-  (see [module-examples](./module-examples.md)).
-
-```bash
-rakitin add module user-profile --arch modular --orm none      # zero-dep baseline
-rakitin add module payment --arch simple --orm mongoose --yes  # unattended
-rakitin add module invoice --arch modular --orm typeorm --dry-run   # preview plan
-OUT=$(rakitin add module invoice --arch simple --orm sequelize --json)
-echo "$OUT" | jq -r '.created[], .nextSteps[0]'    # CI/agent consumption
-```
-
-### 3.3 `rakitin add middleware <kind>`
-
-Express middleware into `app/shared/middlewares/<kebab>.middleware.js`.
-
-```bash
-rakitin add middleware [custom|auth|logger|error|request-time] [--yes] [--no-install] [--json]
-```
-
-* `kind` defaults to `custom`; with `custom --yes` the name question is
-  skipped and it falls back to `custom.middleware.js`.
-* Newly created `auth` triggers manifest key `middleware:auth` →
-  installs `jsonwebtoken` exactly once (skipped otherwise).
-* Existing files are skipped (`skipped[]`); next-step nudge points at
-  making it global via `rakitin integrate`.
-
-```bash
-rakitin add middleware auth                       # JWT guard (+jsonwebtoken)
-rakitin add middleware custom --yes               # non-interactive fallback name
-rakitin add middleware request-time --no-install  # offline-friendly
-R=$(rakitin add middleware logger --json)
-jq -e '.created[0] | endswith("shared/middlewares/logger.middleware.js")' <<<"$R"
-```
-
-### 3.4 `rakitin add util`
-
-Dedicated **interactive** flow; positional args ignored.
-
-Prompts (stdin scripting order): `utilType`
-(`custom,date,string,number,array,object,file,crypto,uuid,url,color,math,validation,regex,time`)
-→ `name` (only when `utilType=custom`; becomes the kebab filename).
-Output lands in `app/shared/utils/<name>.js`. No dependency is ever
-installed (`util:any` ⇒ empty registry entry); other generate-time flags
-have no effect.
-
-```bash
-printf 'uuid\n' | rakitin add util              # scripted pick
-printf 'custom\nslugify\n' | rakitin add util   # type then name
-```
-
-### 3.5 `rakitin add config <kind>`
-
-Env-driven config modules → `app/shared/config/<kebab>.config.js`.
-Kinds: `app database jwt cors logger mailer cloud payment redis socket env
-custom` (default `app`; unknown kinds write a placeholder stub).
-
-Uses the non-interactive core directly — no questions asked even without
-`--yes`; always merges `.env.example` under a stable `# <KIND> CONFIG`
-marker block appended only when absent (custom kinds get per-name markers
-so two customs never dedupe each other). Existing configs surface in
-`skipped[]`.
-
-```bash
-rakitin add config app            # bootstrap (PORT/NODE_ENV/APP_NAME/…)
-rakitin add config jwt            # JWT_* env example entries included
-C=$(rakitin add config redis --json); grep -c '^REDIS_' .env.example
-```
-
-### 3.6 `rakitin add endpoint`
-
-CRUD endpoints for an **existing** module; strictly interactive.
-
-Prompt map: `targetModule` (detected dirs under `app/modules`) →
-`resourceName` → `fieldsInput` (`name:type,…`) → `includePagination`
-(default true) → `includeFiltering` (default true).
-
-* Per-module architecture detection: a `controllers/` folder ⇒ modular
-  variant writes `controllers/<resource>.controller.js` +
-  `services/<resource>.service.js` + `routes/<resource>.router.js`;
-  simple layouts reuse ONE kebab-case controller pair
-  (`<resource>.controller.js` + `<resource>.router.js`) — the old
-  camelCase twin-controller drift was removed (migration §1.11).
-* Controllers always emit pagination/filter parsing so generated code can
-  never hit a `ReferenceError`; services are swappable in-memory stores.
-
-```bash
-printf 'product\nreviews\ntitle:string,rating:number\nY\nY\n' | rakitin add endpoint
-test -f app/modules/product/routes/reviews.router.js && echo wired
-```
-
-### 3.7 `rakitin add validation [name]`
-
-Joi schemas → `app/shared/validators/`; strictly interactive.
-
-Prompt map: `validatorType` (`from-module|new|common`) →
-[`targetModule` + `fieldsInput`] or [`validatorName` + `fieldsInput`]
-(field format `name:type:required`).
-
-* From-module/new produce `<kebab>.validator.js` exporting
-  `<Name>Schema`, `<Name>CreateSchema` (required fields), and
-  `<Name>UpdateSchema` (all optional, `.min(1)`); field-name heuristics map
-  emails/passwords/counters onto apt Joi chains.
-* `common` writes `common.validator.js`, `email.validator.js`,
-  `pagination.validator.js`.
-* Installing `joi` is NOT part of this command — it belongs to consumers /
-  composite recipes (`recipe auth` ensures `validation:joi`).
-
-```bash
-printf 'new\nArticle\ntitle:string:true,body:string:true\n' | rakitin add validation
-printf 'common\n' | rakitin add validation
-```
-
-### 3.8 `rakitin add docs <kind>`
-
-OpenAPI/Swagger scaffolding under `app/docs/`; strictly interactive menu:
-`openapi-json` · `openapi-yaml` · `swagger-ui` · `complete` (spec + UI),
-followed by `apiTitle` (default `My Express API`), `apiVersion`
-(default `1.0.0`), `includeAuth` (adds a `BearerAuth` security scheme,
-default true). Specs are pre-populated with GET/POST(+detail) paths per
-detected module; YAML output uses the built-in dump writer. Prefer
-[`recipe swagger`](#310-rakitin-recipe-swagger) for a headless mount-ready alternative.
-
-```bash
-printf 'complete\nPayments API\n2.1.0\nY\n' | rakitin add docs
-printf 'openapi-json\nCatalog API\n1.0.0\nN\n' | rakitin add docs
-```
-
-### 3.9 `rakitin recipe auth`
-
-Composite advanced-tier recipe: Production-ready JWT authentication with password hashing (`bcryptjs`), complete user model schema (with `email`, `password`, `name`, `role`), full auth controller/service, protected routes, and Joi validation.
-
-```bash
-rakitin recipe auth [--arch simple|modular] [--orm prisma|sequelize|mongoose|typeorm|none] [--pm npm|pnpm|yarn|bun] [--json]
-```
-
-Steps executed:
-① `createMiddleware("auth")` → `app/shared/middlewares/auth.middleware.js` (JWT token verification, attaching `req.user` & `req.credentials`);
-② User module generated with auth-ready controller and service (`register`, `login`, `getProfile`, `updateProfile`, `changePassword`, and sanitized user queries) for the chosen architecture (`modular` / `simple`);
-③ Complete User model generated for the active ORM (`prisma/schema/user.prisma`, Sequelize/Mongoose `user.model.js`, TypeORM `user.entity.js`, or in-memory store) containing `email` (unique), `password`, `name`, `role`, and timestamps;
-④ `app/shared/validators/user.validator.js` with `registerSchema`, `loginSchema`, `updateProfileSchema`, and `changePasswordSchema`;
-⑤ Installs `jsonwebtoken`, `joi`, and `bcryptjs` (keys `recipe:auth`, plus ORM driver if active);
-⑥ Merges `JWT_SECRET=change-me-please` / `JWT_EXPIRES_IN=7d` (and `DATABASE_URL` for Prisma) into `.env.example`.
-
-```bash
-rakitin recipe auth --arch modular --orm prisma      # full Prisma 7 JWT auth
-rakitin recipe auth --arch simple --orm sequelize    # flat Sequelize auth module
-J=$(rakitin recipe auth --json)
-grep -F 'JWT_EXPIRES_IN=7d' .env.example && jq -e '.ok' <<<"$J"
-jq -e 'any(.created[]; contains("validators/user.validator.js"))' <<<"$J"   # CI assertion
-```
-
-### 3.10 `rakitin recipe swagger`
-
-OpenAPI 3 skeleton pre-populated from detected modules + drop-in Swagger UI
-mount helper.
-
-Creates `app/docs/openapi.json` (one GET/POST pair per detected module),
-`app/docs/swagger.setup.js` exposing `mountSwagger(app)` (basePath
-`/api-docs`), and `app/docs/README.md`; installs via key
-`docs:swagger-ui` → `swagger-ui-express` + `swagger-jsdoc`; merges
-`API_BASE_URL=/api` into `.env.example`. All writes use write-if-absent
-safety; delete-then-regenerate is the sanctioned refresh path.
-
-```bash
-rakitin recipe swagger                                       # scaffold
-node -e "require('./app/docs/swagger.setup').mountSwagger" && echo exported
-S=$(rakitin recipe swagger --json); jq -e '.created | length >= 2' <<<"$S"
-sed -n 's/.*basePath = "\([^"]*\)".*/\1/p' app/docs/swagger.setup.js   # /api-docs
-```
-
-### 3.11 `rakitin recipe test`
-
-Jest + Supertest scaffold covering every existing module.
-
-Creates `tests/setup.js` (probes the `app/app.js` export, warns + skips
-HTTP assertions when absent) and `tests/modules/<module>.test.js` per
-detected module (structure assertion + skippable smoke test against
-`/api/<module>` honoring `SKIP_HTTP_TESTS`); adds `"test": "jest"` to
-`package.json` scripts only when unset; installs dev deps
-`jest@^29` + `supertest`, skipping packages already in `node_modules`;
-install failures downgrade to warnings instead of failing the recipe.
-
-```bash
-rakitin recipe test                          # full scaffold
-SKIP_HTTP_TESTS=1 CI=true rakitin recipe test --pm npm --json | jq -e '.ok'
-rakitin recipe test --json | jq -e '.skipped | length > 0'   # idempotent re-run
-```
-
-### 3.12 `rakitin recipe docker`
-
-Multi-stage Dockerfile + compose + dockerignore; zero dependencies.
-
-Writes `Dockerfile` (multi-stage `node:20-alpine`, production runner,
-`CMD ["node", "app/server.js"]`), `docker-compose.yml` (port 3000,
-restart policy), `.dockerignore` (`node_modules`, `.env`, logs), and merges
-`NODE_ENV=production` into `.env.example`. Nothing installed, no daemon
-contacted.
-
-```bash
-rakitin recipe docker && docker build -t my-api .
-D=$(rakitin recipe docker --json); cat .dockerignore   # verify ignored set
-```
-
-### 3.13 `rakitin integrate`
-
-The new headless marker-based router integration; full mechanics in
-[router-integration.md](./router-integration.md).
-
-```bash
-rakitin integrate [--middleware auth,logger,...] [--auto] [--dry-run] [--json]
-```
-
-| Option | Effect |
+| Architecture | Files |
 | --- | --- |
-| `--middleware` | Comma list; a middleware is wired only when `app/shared/middlewares/<kebab>.middleware.js` already exists — dangling requires impossible. |
-| `--auto` | Accepted; auto-detection is inherent (no manual subset picker here). |
-| `--dry-run` | Full plan, nothing written. |
+| `modular` | `app/modules/<kebab>/controllers/<kebab>.controller.js`, `services/<kebab>.service.js`, `routes/<kebab>.router.js` |
+| `simple` | `app/modules/<kebab>/<kebab>.controller.js`, `<kebab>.service.js`, `<kebab>.router.js` |
+| + ORM | modular: `models/<kebab>.model.js` (or `entities/<kebab>.entity.js` for TypeORM) or `prisma/schema/<kebab>.prisma`; simple: `<kebab>.model.js` / `<kebab>.entity.js` |
+| + `orm none`, modular | `models/<kebab>.model.js` placeholder stub |
+| + `--with-tests` (or `generateTestFiles`) | `tests/modules/<kebab>.test.js` |
+| + `--template graphql` | `app/graphql/**` wired for the module |
+| + `--template realtime` | `app/ws/**` with `<kebab>.handler.js` |
 
-Behavior notes:
+The generated controller exports the full verb set
+(`getAll, getById, create, update, remove`) and the router registers
+`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`, plus the managed
+`// rakitin:resources:start|end` region reserved for `add endpoint`.
 
-* Discovery via project detector; each `app/modules/<dir>` gets an
-  independent verdict (`modular` ⇔ `routes/<name>.router.js`, `simple` ⇔
-  `<name>.controller.js`); unrecognized dirs excluded silently; mixed
-  layouts supported.
-* Result actions surfaced as `created`, `markers-regenerated`,
-  `block-injected`, `appended` (marker semantics §Annex).
-* Modular modules mount `router.use('/<kebab>', <id>Router)`; simple ones
-  bind `getAll` + `create` handlers only.
-* Zero valid modules ⇒ exit `0` with guidance message; assert payloads in
-  CI when strictness matters.
+`--template` selects the verb surface and the extra wiring (implemented by
+rendering the same templates with a `verbs` local, so no template
+duplication):
+
+| Template | Verbs | Extra |
+| --- | --- | --- |
+| `crud` (default) | all five | – |
+| `readonly` | `getAll`, `getById` | router registers only those two verbs |
+| `graphql` | all five | + `app/graphql/**` for the module (kind `graphql:core`) |
+| `realtime` | all five | + `app/ws/**` handler for the module (kind `websocket:ws`) |
+
+Dependencies install exactly once through the manifest, with the union of
+kinds (`module:<orm>`, plus `graphql:core` / `websocket:ws` / `test:dev`).
+With `--no-install` or `--dry-run` nothing is spawned.
+
+When `autoIntegrateRouter` is on, the command calls `integrate` itself and
+reports the router file in `created[]`.
 
 ```bash
-rakitin integrate                                  # wire everything found
-rakitin integrate --middleware auth,request-time   # bind existing globals
-rakitin integrate --dry-run | cat                  # preview before review
-I=$(rakitin integrate --middleware auth --json)
-echo "$I" | jq -e '.action | IN("created","markers-regenerated","block-injected","appended")'
-echo "$I" | jq -r '"wired=" + (.wired|join(",")) , "mw=" + (.middlewareApplied|join(","))'
+rakitin add module user --arch modular --orm none --yes
+rakitin add module payment --arch simple --orm mongoose --yes
+rakitin add module article --arch modular --orm prisma --template readonly --yes
+rakitin add module chat --arch simple --orm none --template realtime --yes
+rakitin add module audit --arch modular --orm none --with-tests --yes
+rakitin add module invoice --arch modular --orm typeorm --dry-run --json | jq '.plan'
 ```
 
-### 3.14 `rakitin info`
+### 3.5 `add middleware [kind]`
 
-Compact overview; **always prints one JSON object**:
-
-```json
-{
-  "root": "/abs/path",
-  "npmProject": true,
-  "express": "^5.1.0",
-  "packageManager": "npm",
-  "preset": null,
-  "modules": { "modular": 2, "simple": 1, "mixed": true },
-  "mainRouter": { "exists": true, "markerManaged": false },
-  "middlewares": ["auth", "logger"]
-}
+```bash
+rakitin add middleware [custom|auth|logger|error|request-time] [--custom-name <name>] [--yes]
 ```
 
-`preset` mirrors candidates `.rakitinrc.json` / `.rakitinrc` /
-`rakitin.config.json` when readable.
+Kinds are exactly `MIDDLEWARE_KINDS`; an unknown kind exits 1 with the list.
+Output: `app/shared/middlewares/<kebab>.middleware.js`. Only `auth` pulls a
+dependency (`jsonwebtoken`, kind `middleware:auth`). `custom` needs a name —
+`--custom-name` (validated by `assertSafeName("middleware", …)`) or an
+interactive prompt; with `--yes` and no name it falls back to `custom`.
+Without a kind (and without `--yes`) it prompts from the kind list.
+
+```bash
+rakitin add middleware auth
+rakitin add middleware custom --custom-name my-guard --yes
+rakitin add middleware request-time --no-install
+```
+
+### 3.6 `add util [kind]`
+
+```bash
+rakitin add util <kind> [--custom-name <name>]
+```
+
+Kinds: `custom, date, string, number, array, object, file, crypto, uuid,
+env, url, color, math, validation, regex, time`. Unknown kind ⇒ exit 1 with
+the list. Output: `app/shared/utils/<kebab>.util.js`. No prompting (the
+interactive menu of v1 is gone): a kind is required. `custom` uses
+`--custom-name`. Dependencies per kind come from the manifest
+(`util:uuid` → `uuid`, `util:date` → `dayjs`, `util:env`/`util:any` →
+`dotenv`; the rest are dependency-free).
+
+```bash
+rakitin add util uuid
+rakitin add util date
+rakitin add util custom --custom-name slugify
+```
+
+### 3.7 `add config [kind]`
+
+```bash
+rakitin add config [app|database|jwt|cors|logger|mailer|cloud|payment|redis|socket|env|custom]
+    [--custom-name <name>]
+```
+
+Kinds from `CONFIG_KINDS`; unknown kind ⇒ exit 1 with the list. Output:
+`app/shared/config/<kebab>.config.js` plus an idempotent `.env.example`
+section merged through `mergeEnvExample` under a `# <KIND> CONFIG` marker
+(`# CUSTOM:<name> CONFIG` for custom kinds). `custom` uses `--custom-name`.
+Dependencies are `dotenv` for every kind (`config:*`).
+
+```bash
+rakitin add config app
+rakitin add config jwt
+rakitin add config custom --custom-name stripe
+```
+
+### 3.8 `add endpoint <module>`
+
+```bash
+rakitin add endpoint <module> --resource <name> --fields <a:t,b:t>
+    [--no-pagination] [--no-filtering]
+```
+
+Generates a CRUD resource inside an existing module and mounts it:
+
+- `app/modules/<module>/resources/<resource>.resource.js`
+- `app/modules/<module>/resources/<resource>.controller.js`
+- mounts `router.use("/<resource>", <id>)` into the module router's
+  `// rakitin:resources:start|end` region (idempotent: a second run reports
+  `created: []` and `mount.action: "unchanged"`, with a `.bak`).
+
+`--fields` takes `name:type` pairs (`title:string,price:number`). Pagination
+and filtering are on by default; `--no-pagination` / `--no-filtering` drop
+them. Missing `--resource`/`--fields` ⇒ exit 1 with an example. Missing
+module/controller/router ⇒ exit 1. `data` carries
+`{module, architecture, resource, fields, pagination, filtering, mount}`.
+No dependency is installed.
+
+```bash
+rakitin add endpoint user --resource items --fields title:string,price:number
+rakitin add endpoint article --resource comments --fields body:text --no-filtering
+```
+
+### 3.9 `add validation <name|common>`
+
+```bash
+rakitin add validation <name> [--fields <a:t:req,b:t>] [--from-module <module>] [--common]
+```
+
+Three modes:
+
+| Mode | Trigger | Output |
+| --- | --- | --- |
+| common | `--common`, or name `common` | `app/shared/validators/common.validator.js` — shared schemas (`email`, `uuid`, `date`, `url`, `number`, `string`, `boolean`) plus the auth-shaped `registerSchema`/`loginSchema`/`updateProfileSchema`/`changePasswordSchema` |
+| fields | `--fields a:string:true,b:number` | `app/shared/validators/<kebab>.validator.js` exporting `<camel>Schema`, `<camel>CreateSchema`, `<camel>UpdateSchema` |
+| from-module | `--from-module <module>` | same path; fields parsed from `prisma/schema/<kebab>.prisma` or the Mongoose model |
+
+`--fields` types: `string, number, boolean, date, uuid, email`; the trailing
+`:true` marks a field required. An unknown type ⇒ exit 1
+(`Tipe field tidak dikenal: "<t>". Pilihan: …`). A `--from-module` target
+with no parseable Prisma/Mongoose schema ⇒ exit 1
+(`Tidak bisa membaca field dari modul "<m>". Gunakan --fields <a:string,b:number>.`).
+Neither `--fields` nor `--from-module` nor `--common` ⇒ exit 1 with an
+example. Installs `joi` (kind `validation:joi`).
+
+```bash
+rakitin add validation common
+rakitin add validation product --fields name:string:true,price:number
+rakitin add validation article --from-module article
+```
+
+### 3.10 `add docs [kind]`
+
+```bash
+rakitin add docs <openapi-json|openapi-yaml|swagger-ui|complete>
+    [--title <t>] [--api-version <v>] [--no-auth]
+```
+
+| Kind | Output |
+| --- | --- |
+| `openapi-json` | `app/docs/openapi.json` |
+| `openapi-yaml` | `app/docs/openapi.yaml` (dependency-free emitter) |
+| `swagger-ui` | `app/docs/swagger-ui.js` — self-contained: embeds the spec, exports `{ openapiSpec, mountSwagger(app, basePath = "/docs") }` |
+| `complete` | all three |
+
+Paths are derived from the modules whose router file exists (a module
+without a router is reported in `data.skippedModules`), plus every
+`// rakitin:resources:` mount as `/api/<module>/<resource>`. `--no-auth`
+drops `components.securitySchemes` and the global `security`.
+`--title` defaults to `Rakitin API`, `--api-version` to `1.0.0`.
+
+The kind is validated against the generator's `DOCS_KINDS` **before**
+anything is written, and the dependency kinds are mapped explicitly
+(`complete` and `swagger-ui` → `docs:swagger-ui`, otherwise `docs:<kind>`),
+so an unknown kind exits 1
+(`Jenis dokumentasi tidak dikenal: "<kind>". Pilihan: openapi-json,
+openapi-yaml, swagger-ui, complete.`) without leaving a half-written
+`app/docs`. `openapi-yaml` is dependency-free (the YAML emitter is
+built in), so it installs nothing.
+
+```bash
+rakitin add docs openapi-json
+rakitin add docs openapi-yaml --title "Catalog API" --api-version 2.1.0
+rakitin add docs swagger-ui --no-auth
+rakitin add docs complete
+```
+
+### 3.11 `add test <module|--all>`
+
+```bash
+rakitin add test <module> | --all
+```
+
+Renders `tests/modules/<kebab>.test.js` from the shared template
+(`lib/templates/test/module.test.ejs`), the same template `recipe test`
+uses. `<module>` must already exist under `app/modules/`; `--all` covers
+every detected module. Each file contains structural assertions
+(module dir, controller, router) that only need `fs`/`path`, plus an HTTP
+smoke block gated by `SKIP_HTTP_TESTS=1`. Installs `jest@^29` + `supertest`
+as **devDependencies** (kind `test:dev`). This command writes only the
+per-module test files; `recipe test` additionally writes
+`jest.config.js` + `tests/setup.js` and injects the `test` script.
+
+```bash
+rakitin add test user
+rakitin add test --all
+SKIP_HTTP_TESTS=1 npx jest tests/modules/user.test.js
+```
+
+### 3.12 `add graphql`
+
+```bash
+rakitin add graphql [--module <name>]
+```
+
+Writes the GraphQL layer (see [graphql.md](./graphql.md)):
+
+- `app/graphql/index.js` — `buildSchema` + `mountGraphQL(app, basePath = "/graphql")` + a `graphql({source})` helper
+- `app/graphql/schema.graphql` — root `Query`/`Mutation` plus the managed `# rakitin:graphql:start|end` region
+- `app/graphql/resolvers.js` — `rootValue` map plus the managed `// rakitin:graphql:start|end` region
+- `app/graphql/README.md`
+
+`--module <name>` appends `type <Pascal>` + `Query.<camel>List|Query.<camel>`
++ `Mutation.create<Pascal>|update<Pascal>|delete<Pascal>` into the SDL region
+and the matching resolvers into the JS region, keyed by the per-module
+sentinel `# rakitin:module:<kebab>` / `// rakitin:module:<kebab>` — so it is
+idempotent and never duplicates. The module must already exist, otherwise
+the command exits 1 (`Modul "<m>" tidak ditemukan. Buat dulu: rakitin add
+module <m>`). Installs `graphql` + `graphql-http` (kind `graphql:core`).
+
+```bash
+rakitin add graphql
+rakitin add graphql --module user
+```
+
+### 3.13 `add websocket`
+
+```bash
+rakitin add websocket [--module <name>] [--path </ws>]
+```
+
+Writes the WebSocket layer (see [websocket.md](./websocket.md)):
+
+- `app/ws/index.js` — `attachWebSocket(server, { path })` /
+  `createWebSocketServer({ server, path })`, 30 s heartbeat
+- `app/ws/handlers/index.js` — registry with `register`/`dispatch` and the
+  managed `// rakitin:ws:start|end` region
+- `app/ws/README.md`
+- with `--module <m>`: `app/ws/handlers/<kebab>.handler.js`, registered in
+  the marker region (idempotent; re-running does not duplicate the entry)
+
+`--path` defaults to `/ws` and is normalized to a leading slash without a
+trailing slash. `--module` requires an existing module (else exit 1).
+Installs `ws` (kind `websocket:ws`).
+
+```bash
+rakitin add websocket
+rakitin add websocket --module user --path /realtime
+```
+
+### 3.14 `recipe <auth|swagger|test|docker>`
+
+An unknown recipe exits 1 with the list. Every recipe routes writes through
+the safety layer, honors `--dry-run`/`--no-install`/`--pm`, and reports
+created/skipped paths relative to the project root.
+
+#### `recipe auth`
+
+```bash
+rakitin recipe auth [--arch simple|modular] [--orm prisma|sequelize|mongoose|typeorm|none]
+```
+
+Composes: the JWT `auth` middleware; a `user` module (controller, service,
+router) for the chosen architecture; `app/shared/validators/user.validator.js`;
+the ORM-owned user model (`prisma/schema/user.prisma`, `models/user.model.js`,
+`entities/user.entity.js`, or nothing for `none`) plus the ORM connection
+singleton; `.env.example` (`# AUTH RECIPE` → `JWT_SECRET`,
+`JWT_EXPIRES_IN`). Installs `jsonwebtoken`, `joi`, `bcryptjs`
+(kind `recipe:auth`) plus the ORM kind. With `orm none` the service is an
+in-memory store.
+
+#### `recipe swagger`
+
+Writes `app/shared/config/swagger.config.js` (swagger-jsdoc spec +
+`mountSwagger(app, basePath = "/api-docs")`), `app/docs/index.js`
+(mount-ready re-export), and `.env.example` (`# API DOCS` →
+`API_BASE_URL=/api`). Installs `swagger-ui-express` + `swagger-jsdoc`
+(kind `docs:swagger-ui`).
+
+#### `recipe test`
+
+Writes `jest.config.js` + `tests/setup.js` (via the test-file generator),
+`tests/modules/<kebab>.test.js` for every detected module, and injects the
+`test`/`test:watch` scripts into `package.json` when unset (through
+`updateJsonFile`, `.bak`-backed). Installs `jest@^29` + `supertest` as
+devDependencies.
+
+#### `recipe docker`
+
+Resolves the application entrypoint from
+`app/server.js → bin/www → index.js → app.js` (first existing) and writes a
+multi-stage `Dockerfile` (`FROM node:22-alpine`, `CMD ["node", "<entrypoint>"]`)
+plus `.dockerignore`. No dependencies, no daemon contact. **Without a
+detectable entrypoint the recipe exits 1**:
+`Tidak menemukan entrypoint aplikasi (app/server.js, bin/www, index.js,
+app.js).`
+
+```bash
+rakitin recipe auth --arch modular --orm prisma
+rakitin recipe swagger
+rakitin recipe test
+rakitin recipe docker            # needs app/server.js|bin/www|index.js|app.js
+rakitin recipe docker --dry-run --json | jq '.plan'
+```
+
+### 3.15 `integrate`
+
+```bash
+rakitin integrate [--middleware auth,logger]
+```
+
+Rebuilds the managed region of `app/routes/index.js` from the detected
+module inventory:
+
+```js
+/* rakitin:routes:start */
+const userRouter = require('../modules/user/routes/user.router.js');
+router.use('/user', userRouter);
+/* rakitin:routes:end */
+```
+
+- Modules are detected per-module (`routes/<kebab>.router.js` ⇒ modular,
+  `<kebab>.controller.js` ⇒ simple); **both** architectures emit the same
+  wiring shape (`const <id> = require(...)` + `router.use('/<kebab>', <id>)`).
+  A module whose router file is missing is listed in `skipped[]` with a
+  reason and is **never** emitted as a dangling require.
+- `--middleware` takes a comma list; a middleware is wired only when
+  `app/shared/middlewares/<kebab>.middleware.js` exists, and is attached to
+  every module mount (`router.use('/<kebab>', <id>Router, <mw>)`).
+- Bytes outside the marker region are preserved exactly; regeneration is
+  byte-stable. Each replacement leaves a `.bak` (then `.bak.1`, `.bak.2`, …).
+- `data.action` ∈ `created | markers-regenerated | block-injected | appended`.
+- Zero valid modules ⇒ `ok:false` with a guidance message and exit 0.
+
+```bash
+rakitin integrate
+rakitin integrate --middleware auth,request-time
+rakitin integrate --dry-run --json | jq '.plan[0]'
+```
+
+### 3.16 `plugin <list|add|remove|info> [spec]`
+
+See [plugin-authoring.md](./plugin-authoring.md) for the API. Actions:
+`list` (loaded plugins + load errors), `add <entry>` (resolves the entry
+from the project root, then appends it to `.rakitinrc.json#plugins` through
+`updateJsonFile`), `remove <name>` (drops it; deletes the key entirely when
+the list becomes empty so `package.json#rakitin.plugins` is not shadowed),
+`info <name>` (detail for one plugin). An unknown action exits 1; a
+`add`/`remove`/`info` without a spec exits 1 with an example.
+
+Load errors are **data, not failures**: `list`/`info` report them in
+`data.errors` and stay `ok:true`, so one broken plugin never bricks the CLI.
+`doctor` surfaces the same errors as `warn` checks.
+
+```bash
+rakitin plugin list --json
+rakitin plugin add ./plugins/audit.js
+rakitin plugin add rakitin-plugin-audit
+rakitin plugin info audit
+rakitin plugin remove audit
+```
+
+### 3.17 `info`
+
+```bash
+rakitin info [--json]
+```
+
+Detected-project summary (`data.summary`): root, package name/manager,
+Express version, Node engine, module counts + names, installed ORMs, config
+file + preset/arch/orm, router path + marker state, middlewares, the
+resolved rakitin flags, and plugin load errors. Read-only, never prompts.
 
 ```bash
 rakitin info
 rakitin info --cwd ../services/billing
-rakitin info | jq '.modules.modular == 2'
+rakitin info --json | jq '.data.summary.modules'
 ```
 
-### 3.15 `rakitin doctor`
+### 3.18 `doctor`
 
-Health check; human-text one line per finding + trailing summary count.
+```bash
+rakitin doctor [--json]
+```
 
-| Check | Statuses | Detail logic |
+Health-check with actionable detail. Checks:
+
+| Check | Statuses | Logic |
 | --- | --- | --- |
-| `package.json` | ok/fail | fail when cwd lacks package.json |
-| `Express` | ok/warn | warn when absent (“generator basic tetap bisa dipakai”) |
-| `Struktur app/` | ok/info | info when `app/` will be created during generation |
-| `Modul` | ok/warn/info | warn on mixed architectures; counts modular vs simple |
-| `Router utama` | ok/warn/info | ok when markers found; warn “ada tapi tanpa marker” → injection + `.bak`; info when absent |
-| `Dependency middleware` *(conditional)* | warn | fires when an `auth.middleware.js` exists but `jsonwebtoken` isn’t installed |
+| `package.json` | ok/fail | fail when the cwd has no `package.json` |
+| `Express` | ok/warn | warn when Express is absent |
+| `Struktur app/` | ok/warn | warn when `app/` does not exist yet |
+| `Router utama` | ok/warn/fail | fail when `app/routes/index.js` cannot be read or does not parse (`vm.Script`); warn without markers; ok with markers |
+| `Modul` | ok/warn | warn when there are no modules or mixed architectures |
+| `require "<pkg>"` | warn | one check per dangling require found in `app/**/*.js` (non-relative, non-builtin, not declared in `package.json`) |
+| `plugins` | ok/warn | one warn per plugin load error, or `N plugin dimuat tanpa error` |
+| `dependency <kind>` | warn | fired when a generated feature exists on disk but a package from its `KIND_DEPENDENCIES` kind is missing (auth middleware, validators, YAML docs, GraphQL, WebSocket, test files, Prisma schema) |
 
-Icons: ✅ ok · ⚠️ warn · ❌ fail · ℹ️ info.
-
-```bash
-rakitin doctor                        # baseline triage
-rakitin --cwd ./legacy-app doctor     # foreign repo adoption scan
-```
-
-### 3.16 `rakitin list`
-
-Prints the generator catalog (verbatim from `CATALOG`) with tier labels —
-useful for agents deciding what to call next.
-
-| Command | Tiers | Kind values | Description |
-| --- | --- | --- | --- |
-| `add module <name>` | basic, intermediate, advanced | – | Controller/service/router (+ORM wiring di tier atas) |
-| `add middleware <kind>` | basic | custom, auth, logger, error, request-time | Middleware Express siap pakai |
-| `add util <kind>` | basic | custom, date, string, number, array, object, file, crypto, uuid, env, url, color, math, validation, regex, time | Utility fungsi umum |
-| `add config <kind>` | basic | app, database, jwt, cors, logger, mailer, cloud, payment, redis, socket, env, custom | Config file berbasis env |
-| `add endpoint <resource>` | intermediate | pagination, filtering, joi | CRUD endpoint untuk modul existing |
-| `add validation [name]` | intermediate | module, new, common | Skema validasi Joi |
-| `add docs <kind>` | advanced | openapi-json, openapi-yaml, swagger-ui, complete | OpenAPI/Swagger scaffolding |
-| `recipe auth` | advanced | – | JWT auth lengkap (middleware + user module + joi) |
-| `recipe swagger` | advanced | – | OpenAPI 3 + swagger-ui terhubung modul |
-| `recipe test` | advanced | – | Scaffold jest + supertest per modul |
-| `recipe docker` | advanced | – | Dockerfile multi-stage + compose |
-| `integrate` | basic | – | Sambungkan router utama (marker-based, idempotent) |
-
-### 3.17 `rakitin router` (legacy)
-
-Runs the historical interactive `integrateRouter()` flow unchanged —
-module selection prompt, single global architecture choice, strict
-pre-validation, five-verb simple wiring, optional root `app.js` example.
-All differences versus `integrate` are tabulated in
-[router-integration.md](./router-integration.md#7-old-vs-new-differences-table).
-It consumes none of the result plumbing; thrown errors exit `1` via
-`fail()`.
+`data` = `{checks: [{name, status, detail}], summary: {ok, warn, fail}}`;
+a failing check (`fail > 0`) sets `ok:false` and exit code 1. `--json`
+suppresses the human lines.
 
 ```bash
-rakitin router                 # guided flow
-CI=true printf '' | rakitin    # prefer verbs in CI instead of the menu
+rakitin doctor
+rakitin doctor --json | jq '.data.summary'
 ```
 
-### 3.18 Bare menu (legacy)
-
-Invoking `rakitin` with zero arguments prints the rocket banner and boots
-the original inquirer menu dispatching nine classic capabilities (Module,
-Middleware, Util, Config, Router Integration, API Endpoint, API
-Documentation, API Validation, exit). Kept alive for v1 muscle memory;
-automation should migrate to verbs — see
-[migration guide](./migration-v1-to-v2.md).
+### 3.19 `list`
 
 ```bash
-rakitin               # banner + menu (TTY)
-node bin/rakitin.js   # identical UX when run from an install-less checkout
+rakitin list [--json]
 ```
+
+The generator catalog, **derived from the live registries** (dependency
+manifest, middleware/config/util kind lists, module architectures +
+`--template` variants, recipes, plugin generators) so it cannot drift from
+what the CLI generates. `data.catalog[]` entries are
+`{command, kind?, name?, describe, tier}` with tier ∈
+`basic | intermediate | advanced | plugin`.
+
+```bash
+rakitin list
+rakitin list --json | jq -r '.data.catalog[] | "\(.command) \(.name // .kind // "")"'
+```
+
+### 3.20 `--cli-version`
+
+```bash
+rakitin --cli-version           # prints e.g. 3.0.0
+rakitin --cli-version --json    # { ok:true, created:[], skipped:[], nextSteps:[], message:"3.0.0", data:{version:"3.0.0"} }
+```
+
+Prints `package.json#version` and exits 0. Because yargs is built with
+`.version(false)`, `--version` is not intercepted (it stays usable as
+`add docs --api-version`).
 
 ---
 
-## 4. Behavior annex
+## 4. Marker regions
 
-### 4.1 Marker block literals
+All generated regions use exported tokens from `lib/safety.js`. Bytes
+outside a region are preserved exactly; regeneration is idempotent.
 
-Tokens exported from `lib/safety.js`:
-`/* rakitin:routes:start */` and `/* rakitin:routes:end */`.
-A freshly **created** `app/routes/index.js` has exactly:
+| Region | File | Tokens |
+| --- | --- | --- |
+| Main router | `app/routes/index.js` | `/* rakitin:routes:start */` … `/* rakitin:routes:end */` |
+| Module resources | module router | `// rakitin:resources:start` … `// rakitin:resources:end` |
+| GraphQL SDL | `app/graphql/schema.graphql` | `# rakitin:graphql:start` … `# rakitin:graphql:end` |
+| GraphQL resolvers | `app/graphql/resolvers.js` | `// rakitin:graphql:start` … `// rakitin:graphql:end` |
+| WebSocket registry | `app/ws/handlers/index.js` | `// rakitin:ws:start` … `// rakitin:ws:end` |
 
-```javascript
-const express = require('express');
-const router = express.Router();
+`buildMarkedBlock()` decides what happens:
 
-/* rakitin:routes:start */
-// Routes managed by rakitin - safe to regenerate; keep custom
-// routes OUTSIDE these markers to preserve them.
-// …generated wiring…
+| State of the file | Action | Behavior |
+| --- | --- | --- |
+| absent | `create` | `header` + marked block + `eofFallback` |
+| contains both tokens | `inject` | only the `[start…end]` region is replaced |
+| no tokens, has `module.exports` | `inject` | the block is inserted before the last `module.exports` |
+| no tokens, no anchor | `append` | trimmed content + the block at EOF |
 
-/* rakitin:routes:end */
+Backups are uniquely named: `backupPathFor()` returns `<file>.bak`, then
+`.bak.1`, `.bak.2`, … — an existing backup is never clobbered.
 
-module.exports = router;
+---
+
+## 5. Dependency matrix
+
+Per-command installs come from the single registry in
+`lib/deps/manifest.js`. Full kind → package table and tier mapping live in
+[integration-tiers.md](./integration-tiers.md). Highlights:
+
+| Command | Kinds | Packages |
+| --- | --- | --- |
+| `add module --orm none` | `module:none` | — (zero-dep guarantee) |
+| `add module --orm prisma` | `module:prisma` | `@prisma/client`, `prisma`, `dotenv` |
+| `add module --orm sequelize` | `module:sequelize` | `sequelize`, `mysql2` |
+| `add module --orm mongoose` | `module:mongoose` | `mongoose` |
+| `add module --orm typeorm` | `module:typeorm` | `typeorm`, `reflect-metadata` |
+| `add middleware auth` | `middleware:auth` | `jsonwebtoken` |
+| `add validation` | `validation:joi` | `joi` |
+| `add docs openapi-yaml` | `docs:openapi-yaml` | — (built-in emitter) |
+| `add docs swagger-ui` | `docs:swagger-ui` | `swagger-ui-express`, `swagger-jsdoc` |
+| `add graphql` | `graphql:core` | `graphql`, `graphql-http` |
+| `add websocket` | `websocket:ws` | `ws` |
+| `add test` | `test:dev` (dev) | `jest@^29`, `supertest` |
+| `recipe auth` | `recipe:auth` (+ ORM kind) | `jsonwebtoken`, `joi`, `bcryptjs` |
+
+Unknown kinds are a hard error
+(`Kind dependency tidak dikenal: "<kind>"`), never a silent skip. Installs
+run through `spawn(command, args, { shell: false })` with the detected or
+explicit package manager, retry only on network/registry failures, and
+no-op when `--no-install` or `--dry-run` is active.
+
+---
+
+## 6. Scripting recipes
+
+```bash
+# 1. plan first, nothing is written
+rakitin add module order --arch modular --orm prisma --dry-run --json | jq '.plan'
+
+# 2. execute headlessly, machine-readable
+rakitin add module order --arch modular --orm prisma --yes --no-install --json \
+  | jq -e '(.ok == true) and (.created | length > 0)'
+
+# 3. wire + verify
+rakitin integrate --json | jq -e '.data.wired | index("order")'
+rakitin doctor --json | jq -e '.ok == true'
 ```
 
-### 4.2 What create / inject / append mean
-
-`buildRoutesContent(existing, routeLines)`:
-
-| Action | Precondition | Result |
-| --- | --- | --- |
-| `create` | file absent | header + marked block + export |
-| `inject` | both markers present | only `[start…end]` region swapped; bytes outside untouched |
-| `append` | no markers, no `module.exports` anchor | trimmed content + marked block at EOF |
-| `inject` (2nd form) | no markers, anchor found | block inserted **before** last `module.exports`; preceding bytes identical |
-
-The `integrate` command renames outcomes for humans/agents: `created`,
-`block-injected`, `appended`, plus `markers-regenerated` for idempotent
-marker replacement. When replacing, the region between tokens is rewritten
-without the two creation-time comment lines — the first regeneration
-normalizes to canonical bare tokens (proof in
-[router-integration.md](./router-integration.md#5-idempotency-proof)).
-
-### 4.3 Where `.bak` appears
-
-`overwriteWithBackup(path, content)` copies the previous file to
-`<path>.bak` immediately before replacing it. Practically that means only
-the main router gets a sibling `.bak` (`app/routes/index.js.bak`), because
-every other primitive is write-if-absent. Under dry-run the intent is
-recorded as `{op:"backup+overwrite", path}` and nothing touches disk.
-
-### 4.4 Prompt sequencing maps (script-driven stdin testers)
-
-Answer objects are keyed by Inquirer prompt names; honor conditionals.
-
-* **Bare-menu Module:** `moduleName` → `architecture` (Simple|Modular) →
-  `useORM` (Yes|No list, default Yes) → `orm` (Prisma|Sequelize|Mongoose|
-  TypeORM, when Yes) → `autoIntegrateRouter` (confirm, default No) →
-  `routerArchitecture` (modular|simple, when integrating). Key spelling
-  differs from the headless fill-ins below (`orm` vs `ormChoice`).
-* **Headless `add module` fill-ins:** `moduleName` → `architecture` →
-  `useORM` (boolean confirm) → `ormChoice` (Prisma|Sequelize|Mongoose|
-  TypeORM|None).
-* **Middleware:** `middlewareType` list belongs to the legacy flow; the
-  headless path asks only `customName` for `custom` without `--yes`.
-* **Config (legacy core):** `configType` → `customName` (when custom) →
-  `createEnvExample` (confirm, default true). Headless `add config <kind>`
-  skips all three and always enables the env example.
-* **Util:** `utilType` → `name` (custom only).
-* **Endpoint:** `targetModule` → `resourceName` → `fieldsInput` →
-  `includePagination` → `includeFiltering`.
-* **Validation:** `validatorType` → branch-specific pairs above.
-* **Docs:** `docType` → `apiTitle` → `apiVersion` → `includeAuth`.
-* **Legacy router:** `integrationType` → `selectedModules` (checkbox,
-  manual only) → `architecture` → `useGlobalMiddleware` (confirm) →
-  `selectedMiddlewares` (checkbox: JWT / Logging / Error Handler /
-  Request Time) → `createAppExample` (confirm) → `overwriteApp`
-  (confirm, only when root `app.js` exists).
-
-### 4.5 Dependency auto-install matrix
-
-Single registry mapping generator *kinds* to packages required by their
-output; resolution dedupes and installs once via the detected package
-manager. Never installs `express` — your app owns that choice.
-
-| Generator kind | Packages installed |
-| --- | --- |
-| `module:none` | — (zero-dep guarantee) |
-| `module:prisma` | — via registry; the Prisma flow itself installs `prisma`/`@prisma/client` + runs `npx prisma init` when `schema.prisma` is missing |
-| `module:sequelize` | `sequelize`, `mysql2` |
-| `module:typeorm` | `typeorm`, `reflect-metadata` |
-| `module:mongoose` | `mongoose` |
-| `middleware:auth` | `jsonwebtoken` |
-| `middleware:logger/:error/:request-time/:custom` | — |
-| `util:any` | — |
-| `validation:joi` | `joi` |
-| `docs:openapi-json` / `docs:openapi-yaml` | — / `yaml` |
-| `docs:swagger-ui` | `swagger-ui-express`, `swagger-jsdoc` |
-
-Recipe composition over the same registry:
-
-| Recipe | Ensured keys | Effective packages |
-| --- | --- | --- |
-| `recipe auth` | `middleware:auth`, `validation:joi` | `jsonwebtoken`, `joi` |
-| `recipe swagger` | `docs:swagger-ui` | `swagger-ui-express`, `swagger-jsdoc` |
-| `recipe test` | dev-only installer | `jest@^29`, `supertest` |
-| `recipe docker` | – | — |
-
-Guarantees: already-present packages are never reinstalled; install
-failures degrade to warnings; `--no-install` disables the automatic step
-for `add module` and `add middleware` while recipes own their lifecycle.
+See also: [architecture.md](./architecture.md) (internals),
+[integration-tiers.md](./integration-tiers.md) (dependency tiers),
+[plugin-authoring.md](./plugin-authoring.md), [graphql.md](./graphql.md),
+[websocket.md](./websocket.md), [migration-v2-to-v3.md](./migration-v2-to-v3.md).

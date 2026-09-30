@@ -1,132 +1,164 @@
-# Pengujian Rakitin
+# Pengujian rakitin
 
-Dokumentasi untuk pengujian otomatis proyek Rakitin.
+Dokumentasi untuk pengujian otomatis proyek rakitin. Semua suite bersifat
+**hermetik**: tidak menyentuh repository, tidak memanggil jaringan, dan tidak
+pernah menjalankan child process nyata kecuali suite yang secara eksplisit
+memintanya.
 
 ## Struktur Pengujian
 
 ```
 tests/
-├── setup.js                    # Konfigurasi global untuk pengujian
-├── lib/                        # Pengujian unit untuk fungsi-fungsi inti
-│   ├── utils.test.js           # Pengujian untuk lib/utils.js
-│   ├── constants.test.js       # Pengujian untuk lib/constants.js
-│   ├── prompt.test.js          # Pengujian untuk lib/prompt.js
-│   ├── installer.test.js       # Pengujian untuk lib/installer.js
-│   └── generator/              # Pengujian untuk generator
-│       ├── module.test.js      # Pengujian untuk module generator
-│       ├── arch.test.js        # Pengujian untuk arsitektur (simple & modular)
-│       ├── orm.test.js         # Pengujian untuk implementasi ORM
-│       └── config-router.test.js # Pengujian untuk config & router
-└── integration/                # Pengujian integrasi
-    ├── end-to-end.test.js      # Pengujian alur kerja end-to-end
-    ├── file-validation.test.js # Pengujian validitas file yang dihasilkan
-    └── directory-structure.test.js # Pengujian struktur direktori
+├── setup.js                    # Harness global: temp dir per suite, guard integritas repo,
+│                               #   blokir child_process, stub installer
+├── README.md                   # dokumen ini
+├── unit/                       # fungsi murni (naming, config, logger, template, progress, utils)
+├── lib/                        # layer lib: commands, config-command, constants, installer, plugins
+│   └── generator/              # generator: arch, orm, module, api-generators, graphql,
+│                               #   websocket, testfile
+├── integration/                # alur multi-perintah (end-to-end, directory-structure)
+├── regression/                 # guard bug historis + public API surface
+├── e2e/real-project.test.js    # spawn CLI nyata di proyek sementara
+├── scripts/test-real-project.js# smoke E2E standalone (npm run test:real-project)
+└── fixtures/                   # plugin demo, dsb.
 ```
+
+`__mocks__/child_process.js` di root repository adalah manual mock untuk modul
+inti `child_process`.
 
 ## Menjalankan Pengujian
 
-### Menjalankan Semua Pengujian
 ```bash
-npm test
+npm test                  # seluruh suite (harus hijau DAN meninggalkan tree bersih)
+npm run test:watch        # watch mode
+npm run test:coverage     # dengan coverage
+npm run test:ci           # jest --ci --coverage --watchAll=false
+npm run test:unit         # tests/unit
+npm run test:integration  # tests/integration
+npm run test:e2e          # tests/e2e
+npm run test:real-project # smoke E2E standalone (spawn CLI nyata)
 ```
 
-### Menjalankan Pengujian dengan Watch Mode
-```bash
-npm run test:watch
+## Model Hermetik
+
+### 1. Temp dir per suite (`global.tempDir`)
+
+`tests/setup.js` berjalan sekali per file test dan membuat direktori privat:
+
+```js
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rakitin-test-"));
+global.tempDir = tempDir;
+process.cwd = () => tempDir;   // plain function, dikembalikan di afterAll
 ```
 
-### Menjalankan Pengujian dengan Coverage
-```bash
-npm run test:coverage
+`process.cwd` **sengaja bukan `jest.fn`**: `jest.config.js` memakai
+`clearMocks: true` yang menghapus call history (dan bisa menghapus
+implementasi mock), sehingga `cwd` bisa mengembalikan `undefined` di tengah
+suite. Fungsi biasa kebal terhadap hal itu.
+
+`afterEach` mengosongkan isi temp dir, `jest.clearAllMocks()`, mereset instance
+Logger (`Logger.clearInstances()`) dan plan safety (`safety.resetPlan()`);
+`afterAll` menghapus direktori temp.
+
+### 2. Guard integritas repository
+
+`package.json` dan `package-lock.json` di-hash (sha256) di `beforeAll` dan
+di-hash ulang di `afterAll`. Bila berubah, suite gagal dengan:
+
+```
+[hermetic] test run memodifikasi package.json
 ```
 
-### Menjalankan Pengujian di CI/CD
-```bash
-npm run test:ci
+Artinya `npm test` **wajib** meninggalkan `git status --porcelain` kosong —
+tidak ada instalasi nyata, tidak ada penulisan ke repository.
+
+### 3. Child process diblokir
+
+`tests/setup.js` memanggil `jest.mock("child_process")`, dan
+`__mocks__/child_process.js` melempar untuk `exec`, `execSync`, `spawn`, dan
+`spawnSync` kecuali suite mengaktifkan:
+
+```js
+global.__RAKITIN_REAL_CHILD_PROCESS__ = true;   // sebelum require apa pun
 ```
+
+Suite E2E (`tests/e2e/real-project.test.js`) memakai flag ini karena memang
+harus meng-spawn binary CLI. Seam lain untuk di-stub adalah
+`installer.internals.execCommand` / `installer.internals.spawn`, yang sudah
+di-stub otomatis di `beforeEach`:
+
+```js
+installer.internals.execCommand = jest.fn()
+  .mockResolvedValue({ success: true, stdout: "", stderr: "", code: 0 });
+installer.internals.isPackageInstalled = jest.fn().mockReturnValue(true);
+```
+
+### 4. Setiap pemanggilan CLI memakai `--no-install`
+
+Semua suite dan skrip E2E menjalankan CLI di direktori sementara
+(`os.tmpdir()`, bukan `tests/project/`) dan **selalu** menyertakan
+`--no-install`, sehingga suite sepenuhnya offline dan tidak menyentuh
+`node_modules`.
 
 ## Jenis Pengujian
 
-### 1. Pengujian Unit (Unit Tests)
-Pengujian unit dilakukan untuk setiap fungsi dan modul secara terpisah:
-- **Utils**: Pengujian fungsi utilitas seperti konversi string, operasi file, dll.
-- **Constants**: Pengujian konstanta dan path yang digunakan dalam aplikasi.
-- **Prompt**: Pengujian fungsi prompt untuk interaksi dengan pengguna.
-- **Installer**: Pengujian fungsi instalasi package dan dependensi.
+### Unit (`tests/unit/`)
+Fungsi murni: konversi nama + sanitizer (`naming`), loader config, logger,
+engine EJS, progress UI, utils.
 
-### 2. Pengujian Generator (Generator Tests)
-Pengujian untuk memastikan generator berfungsi dengan benar:
-- **Module Generator**: Pengujian pembuatan modul baru dengan berbagai opsi.
-- **Architecture Tests**: Pengujian pembuatan struktur arsitektur (Simple & Modular).
-- **ORM Tests**: Pengujian integrasi dengan berbagai ORM (Prisma, Sequelize, dll.).
-- **Config & Router**: Pengujian pembuatan konfigurasi dan integrasi router.
+### Layer lib (`tests/lib/`)
+Command layer dan primitifnya dengan fs nyata di `global.tempDir`:
+`commands`, `config-command`, `constants`, `installer` (seam di-stub),
+`plugins` (fixture `tests/fixtures/plugins/demo-plugin.js`), dan
+`generator/*` (arch, orm, module, api-generators, graphql, websocket,
+testfile).
 
-### 3. Pengujian Integrasi (Integration Tests)
-Pengujian untuk memastikan komponen bekerja sama dengan baik:
-- **End-to-End**: Pengujian alur kerja lengkap dari awal hingga akhir.
-- **File Validation**: Pengujian validitas file yang dihasilkan oleh generator.
-- **Directory Structure**: Pengujian struktur direktori yang dibuat oleh generator.
+### Integrasi (`tests/integration/`)
+Alur multi-perintah dan struktur direktori yang dihasilkan.
 
-### 4. Pengujian Real Project (Real Project E2E Tests)
-Pengujian langsung terhadap direktori proyek nyata di `tests/project/` tanpa mocking:
-```bash
-# Update link global rakitin terlebih dahulu
-npm unlink -g rakitin 2>/dev/null || true
-npm link
+### Regression (`tests/regression/`)
+Guard bug historis (`p0-bugfixes`, `core-redesign`, `recipes`,
+`auth-recipe-detail`) dan `public-api` yang memastikan nama export runtime
+setiap `exports` subpath sama dengan daftar yang diharapkan dan muncul di
+`types/index.d.ts`.
 
-# Jalankan suite pengujian real project
-npm run test:real-project
-```
-Aturan lengkap dapat dilihat di [docs/real-project-testing-rules.md](../docs/real-project-testing-rules.md).
+### E2E (`tests/e2e/`, `tests/scripts/test-real-project.js`)
+Menjalankan binary CLI nyata di proyek sementara. Aturan lengkap:
+[docs/real-project-testing-rules.md](../docs/real-project-testing-rules.md).
 
-## Mocking
+## Aturan Menulis Test
 
-Pengujian menggunakan mocking untuk mengisolasi komponen yang sedang diuji:
-- **File System**: Operasi file sistem di-mock untuk menghindari perubahan file yang tidak diinginkan.
-- **Inquirer**: Prompt interaktif di-mock untuk pengujian otomatis.
-- **Child Process**: Perintah eksternal di-mock untuk menghindari eksekusi yang tidak diinginkan.
-- **Dependencies**: Dependensi eksternal di-mock untuk mengisolasi pengujian.
+1. **Jangan mock fs.** Gunakan fs nyata di `global.tempDir` dan periksa state
+   disk (`fs.existsSync`, baca ulang isi file). Mock fs menyembunyikan bug
+   lazy-path.
+2. **Validasi JS hasil generate dengan compile**, bukan eksekusi:
+   `expect(() => new vm.Script(src)).not.toThrow()` atau `node --check`.
+3. **Assert perilaku, bukan teks.** Test permanen harus menangkap bug yang
+   terlihat konsumen (perilaku, batas, invarian, transisi, precedence, error) —
+   bukan kalimat pesan, default insidental, atau `typeof`.
+4. **Uji alur prompt secara headless**: panggil core function atau
+   `addCommand(thing, name, ctx)` dengan konteks lengkap (`yes: true`), jangan
+   script stdin/inquirer.
+5. **Selalu `await`** promise installer/manifest; fire-and-forget adalah bug
+   historis yang membuat import menggantung.
+6. **Bersihkan yang kamu ubah**: simpan & kembalikan `installer.internals`
+   atau state global lain di `afterAll` suite kamu.
 
 ## Coverage
 
-Pengujian dirancang untuk mencapai coverage yang tinggi:
-- **Lines**: Persentase baris kode yang dieksekusi selama pengujian.
-- **Functions**: Persentase fungsi yang dipanggil selama pengujian.
-- **Branches**: Persentase cabang kondisi yang dieksekusi selama pengujian.
-- **Statements**: Persentase pernyataan yang dieksekusi selama pengujian.
-
-Laporan coverage dapat ditemukan di direktori `coverage/` setelah menjalankan `npm run test:coverage`.
+`collectCoverageFrom` mencakup `lib/**` dan `bin/**` (kecuali
+`lib/templates/**`). Laporan ada di `coverage/` setelah
+`npm run test:coverage`.
 
 ## CI/CD
 
-Pengujian otomatis diintegrasikan dengan GitHub Actions:
-- **Multiple Node.js Versions**: Pengujian dijalankan pada Node.js 14.x, 16.x, 18.x, dan 20.x.
-- **Multiple OS**: Pengujian dijalankan pada Ubuntu, Windows, dan macOS.
-- **Coverage Reporting**: Laporan coverage diunggah ke Codecov.
-- **Automated Testing**: Pengujian otomatis dijalankan pada setiap push dan pull request.
+`.github/workflows/ci.yml`:
 
-## Best Practices
-
-1. **Test Isolation**: Setiap pengujian harus independen dan tidak bergantung pada pengujian lain.
-2. **Clear Naming**: Nama pengujian harus jelas dan deskriptif.
-3. **Arrange-Act-Assert**: Struktur pengujian mengikuti pola Arrange-Act-Assert.
-4. **Mock External Dependencies**: Dependensi eksternal harus di-mock untuk isolasi.
-5. **Test Edge Cases**: Kasus edge dan error handling harus diuji.
-6. **Regular Updates**: Pengujian harus diperbarui saat kode berubah.
-
-## Troubleshooting
-
-### Pengujian Gagal
-1. Periksa pesan error untuk mengetahui penyebabnya.
-2. Pastikan semua dependensi terinstall dengan `npm install`.
-3. Coba jalankan pengujian satu per satu untuk mengisolasi masalah.
-
-### Coverage Rendah
-1. Identifikasi bagian kode yang tidak tercakup dalam pengujian.
-2. Tambahkan pengujian untuk bagian kode yang tidak tercakup.
-3. Pastikan semua cabang kondisi memiliki pengujian.
-
-### Mocking Tidak Berfungsi
-1. Pastikan mock diatur sebelum pengujian dijalankan.
-2. Reset mock setelah setiap pengujian dengan `jest.clearAllMocks()`.
-3. Verifikasi bahwa mock dipanggil dengan argumen yang benar.
+- **Matrix Node 22.x / 24.x** → `npm run test:ci`.
+- **Tree-dirty gate**: setelah suite, `git diff --exit-code` harus bersih —
+  suite tidak boleh mengubah repository.
+- **Stdout purity**: perintah `--json` diuji dengan `jq -e .` sehingga stdout
+  hanya berisi satu objek JSON.
+- Job **lint** (ESLint flat config, termasuk `no-console` untuk `lib/**`),
+  **typecheck** (`tsc --noEmit`, tanpa `skipLibCheck`), dan **smoke** (CLI
+  headless di direktori sementara + bukti dry-run tidak menyentuh disk).

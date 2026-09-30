@@ -30,8 +30,8 @@ Before submitting the PR, make sure you have:
 - [ ] Menambah atau memperbarui dokumentasi yang relevan
 - [ ] Menambah atau memperbarui tes untuk perubahan Anda
 - [ ] Memastikan semua tes lulus (`npm test`)
-- [ ] Memastikan kode linter lulus (`npm run lint` jika ada)
-- [ ] Memastikan build berhasil (`npm run build` jika ada)
+- [ ] Memastikan kode linter lulus (`npm run lint`)
+- [ ] Memastikan typecheck lulus (`npm run typecheck`)
 - [ ] Menambahkan entri di [CHANGELOG.md](../CHANGELOG.md) jika perlu
 - [ ] Memberikan deskripsi yang jelas untuk perubahan Anda
 

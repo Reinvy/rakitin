@@ -1,371 +1,339 @@
 /**
- * Command layer tests - headless flows without spawning the process.
- * process.cwd() is the per-suite mkdtemp from setup.js.
+ * Command-layer tests for the headless `rakitin add …` surface.
+ *
+ * Everything runs through `buildContext()` + `addCommand()` in this suite's
+ * temp dir (process.cwd()). No process is spawned: `installer.internals`
+ * is stubbed by tests/setup.js and `--no-install` (context.install:false)
+ * keeps the dependency layer a no-op.
  */
-const fs = require("fs-extra");
+
+const fs = require("fs");
 const path = require("path");
-const shared = require("../../lib/commands/shared");
-const { initCommand } = require("../../lib/commands/init");
+const { buildContext } = require("../../lib/commands/shared");
 const { addCommand } = require("../../lib/commands/add");
-const { integrateCommand } = require("../../lib/commands/integrate");
-const { infoCommand, doctorCommand, listCommand } = require("../../lib/commands/info");
+const { ensureDependencies } = require("../../lib/deps/manifest");
+const safety = require("../../lib/safety");
 const installer = require("../../lib/installer");
 
-beforeEach(() => {
-  jest.spyOn(console, "log").mockImplementation(() => {});
-  installer.internals.execCommand = jest.fn().mockResolvedValue({
-    success: true,
-    stdout: "",
-    stderr: "",
-  });
-});
+const CRUD_VERBS = ["getAll", "getById", "create", "update", "remove"];
 
-afterEach(() => {
-  jest.restoreAllMocks();
-});
+const abs = (rel) => path.join(global.tempDir, rel);
+const exists = (rel) => fs.existsSync(abs(rel));
+const read = (rel) => fs.readFileSync(abs(rel), "utf8");
+
+/** A headless context; `install:false` every CLI test runs with --no-install. */
+function ctx(overrides = {}) {
+  return buildContext({ yes: true, install: false, ...overrides });
+}
+
+function controllerVerbs(rel) {
+  return [...read(rel).matchAll(/^exports\.(\w+) =/gm)].map((m) => m[1]);
+}
+
+function expectRelativeAndOnDisk(entries) {
+  expect(entries.length).toBeGreaterThan(0);
+  for (const entry of entries) {
+    expect(path.isAbsolute(entry)).toBe(false);
+    expect(entry).not.toContain("\\");
+    expect(exists(entry)).toBe(true);
+  }
+}
 
 describe("buildContext", () => {
-  test("normalizes flag aliases", () => {
-    const ctx = shared.buildContext({
-      yes: true,
-      "dry-run": true,
-      arch: "modular",
-      install: false,
-    });
-    expect(ctx.yes).toBe(true);
-    expect(ctx.dryRun).toBe(true);
-    expect(ctx.arch).toBe("modular");
-    expect(ctx.install).toBe(false);
+  test("normalizes architecture and ORM flags", () => {
+    const context = ctx({ arch: "SIMPLE", orm: "Sequelize" });
+
+    expect(context.arch).toBe("simple");
+    expect(context.orm).toBe("sequelize");
+    expect(context.install).toBe(false);
+  });
+
+  test("auto-selects the preset from the ORM flag", () => {
+    expect(ctx({}).preset).toBe("basic");
+    expect(ctx({ orm: "prisma" }).preset).toBe("intermediate");
+  });
+
+  test("defaults arch to modular, template to crud and install to true", () => {
+    const context = buildContext({ yes: true });
+
+    expect(context.arch).toBe("modular");
+    expect(context.template).toBe("crud");
+    expect(context.install).toBe(true);
+    expect(context.autoIntegrateRouter).toBe(true);
+    expect(context.dryRun).toBe(false);
   });
 });
 
-describe("initCommand", () => {
-  test("writes .rakitinrc.json with auto-selected preset and default orm prisma", async () => {
-    const result = await initCommand();
-    const cfgPath = path.join(global.tempDir, ".rakitinrc.json");
+describe("add module", () => {
+  afterEach(() => safety.resetPlan());
 
-    expect(result.created).toBe(true);
-    expect(fs.existsSync(cfgPath)).toBe(true);
+  test("simple architecture: writes the module and wires the main router", async () => {
+    const result = await addCommand("module", "user", ctx({ arch: "simple", orm: "none" }));
 
-    const cfg = fs.readJsonSync(cfgPath);
-    expect(["basic", "intermediate"]).toContain(cfg.preset);
-    expect(cfg.orm).toBe("prisma");
-    expect(cfg.version).toBe(2);
-    expect(cfg.defaultArchitecture).toBe("modular");
-    expect(cfg.autoIntegrateRouter).toBe(true);
-  });
-
-  test("writes .rakitinrc.json with explicit orm, arch, pm, and autoIntegrate options", async () => {
-    const result = await initCommand({
-      orm: "sequelize",
-      arch: "simple",
-      pm: "pnpm",
-      autoIntegrate: false,
-      force: true,
-      install: false,
+    expect(result.ok).toBe(true);
+    expectRelativeAndOnDisk(result.created);
+    expect(result.created).toEqual(
+      expect.arrayContaining([
+        "app/modules/user/user.controller.js",
+        "app/modules/user/user.service.js",
+        "app/modules/user/user.router.js",
+        "app/routes/index.js",
+      ])
+    );
+    expect(result.data).toMatchObject({
+      module: "user",
+      architecture: "simple",
+      orm: "None",
+      template: "crud",
     });
-    const cfgPath = path.join(global.tempDir, ".rakitinrc.json");
+    expect(controllerVerbs("app/modules/user/user.controller.js")).toEqual(CRUD_VERBS);
 
-    expect(result.created).toBe(true);
-    const cfg = fs.readJsonSync(cfgPath);
-    expect(cfg.orm).toBe("sequelize");
-    expect(cfg.defaultArchitecture).toBe("simple");
-    expect(cfg.packageManager).toBe("pnpm");
-    expect(cfg.autoIntegrateRouter).toBe(false);
+    const router = read("app/routes/index.js");
+    expect(router).toContain("const userRouter = require('../modules/user/user.router.js');");
+    expect(router).toContain("router.use('/user', userRouter);");
+    expect(router).not.toContain("controller.");
   });
 
-  test("sets up base router and ORM files during init", async () => {
-    await initCommand({ orm: "prisma", force: true, install: false });
+  test("modular architecture: writes the layered layout plus the None-ORM placeholder", async () => {
+    const result = await addCommand("module", "order", ctx({ arch: "modular", orm: "none" }));
 
-    // Base router created
-    expect(fs.existsSync(path.join(global.tempDir, "app", "routes", "index.js"))).toBe(true);
-    // Prisma base schema and db singleton created
-    expect(fs.existsSync(path.join(global.tempDir, "prisma", "schema", "base.prisma"))).toBe(true);
-    expect(fs.existsSync(path.join(global.tempDir, "app", "shared", "config", "db.js"))).toBe(true);
-  });
-
-  test("wires app.js with rakitin /api router when app.js exists", async () => {
-    const appJsPath = path.join(global.tempDir, "app.js");
-    fs.writeFileSync(appJsPath, 'const express = require("express");\nconst app = express();\n\nmodule.exports = app;\n', "utf8");
-
-    await initCommand({ force: true, install: false });
-
-    const appContent = fs.readFileSync(appJsPath, "utf8");
-    expect(appContent).toContain("app/routes");
-    expect(appContent).toContain("app.use('/api', rakitinRouter)");
-  });
-
-  test("rejects unknown orm", async () => {
-    await expect(initCommand({ orm: "invalid-orm", force: true })).rejects.toThrow(
-      /ORM tidak dikenal/
+    expectRelativeAndOnDisk(result.created);
+    expect(result.created).toEqual(
+      expect.arrayContaining([
+        "app/modules/order/controllers/order.controller.js",
+        "app/modules/order/services/order.service.js",
+        "app/modules/order/routes/order.router.js",
+        "app/modules/order/models/order.model.js",
+        "app/routes/index.js",
+      ])
+    );
+    expect(read("app/routes/index.js")).toContain(
+      "const orderRouter = require('../modules/order/routes/order.router.js');"
     );
   });
 
-  test("rejects unknown arch", async () => {
-    await expect(initCommand({ arch: "invalid-arch", force: true })).rejects.toThrow(
-      /Arsitektur tidak dikenal/
+  test("--template readonly emits only getAll/getById in controller and router", async () => {
+    const result = await addCommand(
+      "module",
+      "report",
+      ctx({ arch: "modular", orm: "none", template: "readonly" })
+    );
+
+    expect(result.data.template).toBe("readonly");
+    const controller = "app/modules/report/controllers/report.controller.js";
+    const router = "app/modules/report/routes/report.router.js";
+
+    expect(controllerVerbs(controller)).toEqual(["getAll", "getById"]);
+    expect(read(controller)).not.toMatch(/exports\.(create|update|remove)\b/);
+    const routes = [
+      ...read(router).matchAll(/router\.(\w+)\("([^"]*)", controller\.(\w+)\)/g),
+    ].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
+    expect(routes).toEqual(["get / getAll", "get /:id getById"]);
+    expect(read(router)).not.toMatch(/controller\.(create|update|remove)\b/);
+  });
+
+  test("rejects an unknown --template", async () => {
+    await expect(
+      addCommand("module", "oops", ctx({ arch: "simple", orm: "none", template: "nope" }))
+    ).rejects.toThrow(/Template tidak dikenal: "nope"/);
+    expect(exists("app/modules/oops")).toBe(false);
+  });
+
+  test("rejects an unknown architecture and an unknown ORM", async () => {
+    await expect(addCommand("module", "a", ctx({ arch: "hexagonal" }))).rejects.toThrow(
+      /Arsitektur tidak dikenal: "hexagonal"/
+    );
+    await expect(addCommand("module", "b", ctx({ orm: "mongodb" }))).rejects.toThrow(
+      /ORM tidak dikenal: "mongodb"/
     );
   });
 
-  test("rejects unknown package manager", async () => {
-    await expect(initCommand({ pm: "invalid-pm", force: true })).rejects.toThrow(
-      /Package manager tidak dikenal/
+  test("requires a module name when --yes is set", async () => {
+    await expect(addCommand("module", undefined, ctx({}))).rejects.toThrow(
+      /Nama modul wajib ada\. Contoh: rakitin add module user --arch modular --orm none --yes/
     );
   });
 
-  test("idempotent without force; auto-preset preserved", async () => {
-    const first = await initCommand();
-    const cfgPath = path.join(global.tempDir, ".rakitinrc.json");
-    expect(first.created).toBe(true);
-
-    // setup.js wipes temp between tests - assert within one run.
-    const second = await initCommand({ preset: "advanced" });
-    expect(second.created).toBe(false);
-    const cfg = fs.readJsonSync(cfgPath);
-    expect(cfg.preset).not.toBe("advanced");
+  test("rejects an unsafe module name without writing anything", async () => {
+    await expect(addCommand("module", "../evil", ctx({ arch: "simple" }))).rejects.toThrow(
+      /Nama module tidak valid/
+    );
+    expect(fs.existsSync(path.join(global.tempDir, "..", "evil"))).toBe(false);
   });
 
-  test("rejects unknown presets", async () => {
-    await expect(initCommand({ preset: "nope", force: true })).rejects.toThrow(
-      /Preset tidak dikenal/
+  test("--no-auto-integrate leaves the main router untouched", async () => {
+    const result = await addCommand(
+      "module",
+      "standalone",
+      ctx({ arch: "simple", orm: "none", autoIntegrate: false })
     );
+
+    expect(result.created).not.toContain("app/routes/index.js");
+    expect(exists("app/routes/index.js")).toBe(false);
+    expect(result.nextSteps.join(" ")).toMatch(/rakitin integrate/);
+  });
+
+  test("a real ORM replaces the placeholder model with the generated one (F-2 guard)", async () => {
+    const result = await addCommand(
+      "module",
+      "invoice",
+      ctx({ arch: "modular", orm: "sequelize" })
+    );
+
+    const modelPath = "app/modules/invoice/models/invoice.model.js";
+    expect(result.created.filter((entry) => entry === modelPath)).toHaveLength(1);
+    // The arch placeholder is gone: this is the real Sequelize model.
+    expect(read(modelPath)).toContain("module.exports = Invoice;");
+    expect(read(modelPath)).toContain("sequelize.define(");
+    expect(read(modelPath)).not.toContain("in-memory store");
+    expect(result.created).toContain("app/shared/config/database.js");
+    expect(result.data.orm).toBe("Sequelize");
+  });
+
+  test("is idempotent: a rerun creates nothing and reports every file as skipped", async () => {
+    await addCommand("module", "ledger", ctx({ arch: "simple", orm: "none" }));
+    const second = await addCommand("module", "ledger", ctx({ arch: "simple", orm: "none" }));
+
+    expect(second.created).toEqual([]);
+    expect(second.skipped).toEqual(
+      expect.arrayContaining([
+        "app/modules/ledger/ledger.controller.js",
+        "app/modules/ledger/ledger.service.js",
+        "app/modules/ledger/ledger.router.js",
+      ])
+    );
+  });
+
+  test("dry-run plans every write and touches no disk", async () => {
+    safety.beginPlan();
+
+    const result = await addCommand("module", "ghost", ctx({ arch: "modular", orm: "mongoose" }));
+
+    expect(safety.isDryRun()).toBe(true);
+    expect(exists("app/modules/ghost")).toBe(false);
+    expect(exists("app/routes/index.js")).toBe(false);
+    expect(exists(".env.example")).toBe(false);
+    expect(exists("app/shared/config/db.js")).toBe(false);
+
+    const plan = safety.getPlan();
+    const ops = plan.map((entry) => entry.op);
+    expect(ops.length).toBeGreaterThan(0);
+    expect(ops.every((op) => ["create", "overwrite", "mkdir", "install"].includes(op))).toBe(true);
+    expect(plan.every((entry) => path.isAbsolute(entry.path))).toBe(true);
+    expect(plan.map((entry) => entry.path)).toEqual(
+      expect.arrayContaining([
+        abs("app/modules/ghost/controllers/ghost.controller.js"),
+        abs("app/modules/ghost/models/ghost.model.js"),
+        abs("app/shared/config/db.js"),
+        abs(".env.example"),
+      ])
+    );
+    // The module's router file is only planned, so wiring legitimately has
+    // nothing on disk to mount yet; the next step says so.
+    expect(plan.map((entry) => entry.path)).not.toContain(abs("app/routes/index.js"));
+    expect(result.nextSteps.join(" ")).toMatch(/rakitin integrate/);
+    // Dry-run output is reported as planned work, not as created files.
+    expect(result.ok).toBe(true);
+  });
+
+  test("ensureDependencies is a no-op under --no-install (no child process)", async () => {
+    const execSpy = installer.internals.execCommand;
+
+    const result = await addCommand(
+      "module",
+      "deps-off",
+      ctx({ arch: "simple", orm: "sequelize" })
+    );
+
+    expect(execSpy).not.toHaveBeenCalled();
+    expect(result.data.install).toEqual({
+      success: true,
+      installed: [],
+      skipped: ["sequelize", "mysql2"],
+      failed: [],
+    });
+  });
+
+  test("ensureDependencies is a no-op while a dry-run plan is active", async () => {
+    const execSpy = installer.internals.execCommand;
+    safety.beginPlan();
+
+    const result = await ensureDependencies(["module:sequelize"], {
+      install: true,
+      root: global.tempDir,
+    });
+
+    expect(execSpy).not.toHaveBeenCalled();
+    expect(result.installed).toEqual([]);
+    expect(result.skipped).toEqual(["sequelize", "mysql2"]);
+    expect(result.success).toBe(true);
   });
 });
 
-describe("addCommand headless", () => {
-  beforeEach(() => {
-    fs.outputJsonSync(path.join(global.tempDir, "package.json"), {
-      name: "headless-demo",
-      dependencies: { express: "^4.0.0" },
-    });
+describe("add middleware / config", () => {
+  afterEach(() => safety.resetPlan());
+
+  test("writes the requested middleware file", async () => {
+    const result = await addCommand("middleware", "auth", ctx());
+
+    expect(result.ok).toBe(true);
+    expectRelativeAndOnDisk(result.created);
+    expect(result.created).toEqual(["app/shared/middlewares/auth.middleware.js"]);
+    expect(result.data.name).toBe("auth");
   });
 
-  test("module defaults to Prisma when --orm is omitted", async () => {
-    const ctx = shared.buildContext({
-      yes: true,
-      arch: "modular",
-      install: false,
-    });
-
-    await addCommand("module", "article", ctx);
-
-    const modDir = path.join(global.tempDir, "app", "modules", "article");
-    expect(fs.existsSync(path.join(modDir, "services", "article.service.js"))).toBe(true);
-    // Prisma model and singleton must be generated
-    expect(
-      fs.existsSync(path.join(global.tempDir, "prisma", "schema", "article.prisma"))
-    ).toBe(true);
-    expect(
-      fs.existsSync(path.join(global.tempDir, "app", "shared", "config", "db.js"))
-    ).toBe(true);
-  });
-
-  test("module respects orm configured in .rakitinrc.json", async () => {
-    fs.outputJsonSync(path.join(global.tempDir, ".rakitinrc.json"), {
-      preset: "basic",
-      orm: "sequelize",
-      version: 2,
-    });
-
-    const ctx = shared.buildContext({
-      yes: true,
-      arch: "modular",
-      install: false,
-    });
-
-    await addCommand("module", "order", ctx);
-
-    expect(
-      fs.existsSync(
-        path.join(
-          global.tempDir,
-          "app",
-          "modules",
-          "order",
-          "models",
-          "order.model.js"
-        )
-      )
-    ).toBe(true);
-  });
-
-  test("module with all flags runs with ZERO prompts", async () => {
-    const ctx = shared.buildContext({
-      yes: true,
-      arch: "modular",
-      orm: "none",
-      install: false,
-    });
-
-    await addCommand("module", "payment", ctx);
-
-    const modDir = path.join(global.tempDir, "app", "modules", "payment");
-    ["controllers", "services", "models", "routes"].forEach((d) =>
-      expect(fs.existsSync(path.join(modDir, d))).toBe(true)
+  test("rejects an unknown middleware kind", async () => {
+    await expect(addCommand("middleware", "nope", ctx())).rejects.toThrow(
+      /Jenis middleware tidak dikenal: "nope"\. Pilihan: custom, auth, logger, error, request-time\./
     );
   });
 
-  test("REGRESSION: --orm mongoose produces ORM artifacts headlessly", async () => {
-    const ctx = shared.buildContext({
-      yes: true,
-      arch: "modular",
-      orm: "mongoose",
-      install: false,
-    });
-    await addCommand("module", "invoice", ctx);
-
-    // ORM model must exist - previously only architecture files were made
-    expect(
-      fs.existsSync(
-        path.join(
-          global.tempDir,
-          "app",
-          "modules",
-          "invoice",
-          "models",
-          "invoice.model.js"
-        )
-      )
-    ).toBe(true);
-  });
-
-  test("middleware auth routes through manifest deps", async () => {
-    const ctx = shared.buildContext({ yes: true, install: false, json: false });
-    const result = await addCommand("middleware", "auth", ctx);
-
-    expect(result.created).toBe(true);
-    const mwFile = path.join(
-      global.tempDir,
-      "app",
-      "shared",
-      "middlewares",
-      "auth.middleware.js"
-    );
-    expect(fs.existsSync(mwFile)).toBe(true);
-    expect(fs.readFileSync(mwFile, "utf8")).toContain("jsonwebtoken");
-  });
-
-  test("config jwt writes env example keys", async () => {
-    const ctx = shared.buildContext({ yes: true });
-    await addCommand("config", "jwt", ctx);
-
-    expect(
-      fs.existsSync(path.join(global.tempDir, "app", "shared", "config", "jwt.config.js"))
-    ).toBe(true);
-    const envExample = path.join(global.tempDir, ".env.example");
-    expect(fs.readFileSync(envExample, "utf8")).toContain("JWT_");
-  });
-
-  test("unknown generator kind fails loudly", async () => {
-    const ctx = shared.buildContext({ yes: true });
-    await expect(addCommand("warp-drive", undefined, ctx)).rejects.toThrow(
-      /tidak dikenal/
+  test("requires a middleware kind when --yes is set", async () => {
+    await expect(addCommand("middleware", undefined, ctx())).rejects.toThrow(
+      /Jenis middleware wajib ada\. Contoh: rakitin add middleware auth --yes/
     );
   });
-});
 
-describe("integrateCommand", () => {
-  beforeEach(() => {
-    fs.outputJsonSync(path.join(global.tempDir, "package.json"), {
-      name: "int-demo",
-      dependencies: { express: "^4.0.0" },
-    });
-  });
+  test("adds config jwt and merges .env.example exactly once", async () => {
+    const first = await addCommand("config", "jwt", ctx());
 
-  test("no modules -> actionable guidance, no crash", async () => {
-    const res = await integrateCommand({});
-    expect(res.ok).toBe(false);
-    expect(res.message).toMatch(/add module/);
-  });
-
-  test("respects each module architecture + skips missing middleware", async () => {
-    seedModularModule("alpha-mod");
-    seedSimpleModule("beta-mod");
-
-    const res = await integrateCommand({
-      middleware: "auth,nonexistent-mw",
-    });
-
-    expect(res.ok).toBe(true);
-    expect(res.wired.sort()).toEqual(["alpha-mod", "beta-mod"]);
-    expect(res.middlewareApplied).toEqual([]); // auth file doesn't exist yet
-
-    const routerSrc = fs.readFileSync(
-      path.join(global.tempDir, "app", "routes", "index.js"),
-      "utf8"
+    expect(first.created).toEqual(
+      expect.arrayContaining(["app/shared/config/jwt.config.js", ".env.example"])
     );
-    expect(routerSrc).toContain(
-      "require('../modules/alpha-mod/routes/alpha-mod.router')"
+    const env = read(".env.example");
+    expect(env).toContain("# JWT CONFIG");
+    expect(env).toContain("JWT_SECRET=");
+    expect(read("app/shared/config/jwt.config.js")).toContain("// Config: JWT");
+
+    const second = await addCommand("config", "jwt", ctx());
+
+    expect(second.created).toEqual([]);
+    expect(second.skipped).toEqual(
+      expect.arrayContaining(["app/shared/config/jwt.config.js", ".env.example"])
     );
-    expect(routerSrc).toContain("require('../modules/beta-mod/beta-mod.controller')");
-    expect(routerSrc).not.toContain("nonexistent-mw"); // dangling require never emitted
+    expect(read(".env.example")).toBe(env);
   });
 
-  test("existing user routes stay untouched across regenerations", async () => {
-    seedModularModule("gamma-mod");
-    await integrateCommand({});
-
-    // User adds a custom route OUTSIDE markers
-    const routerPath = path.join(global.tempDir, "app", "routes", "index.js");
-    const withUserRoute = fs
-      .readFileSync(routerPath, "utf8")
-      .replace(
-        safetyStart(),
-        `router.get('/custom', (q,s)=>s.send());\n\n${safetyStart()}`
-      );
-    fs.writeFileSync(routerPath, withUserRoute);
-
-    await integrateCommand({});
-
-    const after = fs.readFileSync(routerPath, "utf8");
-    expect(after).toContain("/custom");
-    expect(after.match(/\/custom/g)).toHaveLength(1);
-    // Managed wiring regenerated exactly once still
-    expect(after.match(/alpha-mod|gamma-mod/g)).toBeTruthy();
-  });
-});
-
-function safetyStart() {
-  return "/* rakitin:routes:start */";
-}
-
-function seedModularModule(name) {
-  const dir = path.join(global.tempDir, "app", "modules", name);
-  fs.ensureDirSync(path.join(dir, "routes"));
-  fs.outputFileSync(
-    path.join(dir, "routes", `${name}.router.js`),
-    'module.exports = require("express").Router();'
-  );
-}
-
-function seedSimpleModule(name) {
-  const dir = path.join(global.tempDir, "app", "modules", name);
-  fs.ensureDirSync(dir);
-  fs.outputFileSync(
-    path.join(dir, `${name}.controller.js`),
-    "exports.getAll=(q,s)=>s.json({});exports.create=(q,s)=>s.json({});"
-  );
-}
-
-describe("info/doctor/list", () => {
-  test("info summary is structured", () => {
-    const { summary } = infoCommand();
-    expect(summary.root).toBe(global.tempDir);
-    expect(summary.modules).toHaveProperty("modular");
+  test("rejects an unknown config kind", async () => {
+    await expect(addCommand("config", "nope", ctx())).rejects.toThrow(
+      /Jenis config tidak dikenal: "nope"/
+    );
   });
 
-  test("doctor returns health checks array", () => {
-    const { checks } = doctorCommand();
-    expect(checks.length).toBeGreaterThan(2);
-    const names = checks.map((c) => c.name);
-    expect(names).toContain("package.json");
-    expect(names).toContain("Express");
-    expect(names).toContain("Router utama");
-  });
+  test("dry-run creates neither the config file nor .env.example", async () => {
+    safety.beginPlan();
 
-  test("list catalog covers tiers and recipes", () => {
-    const { catalog } = listCommand();
-    expect(catalog.some((i) => i.command.startsWith("recipe auth"))).toBe(true);
-    expect(catalog.every((i) => Array.isArray(i.tiers))).toBe(true);
+    const result = await addCommand("config", "redis", ctx());
+
+    expect(result.ok).toBe(true);
+    expect(exists("app/shared/config/redis.config.js")).toBe(false);
+    expect(exists(".env.example")).toBe(false);
+    expect(safety.getPlan().map((e) => e.op)).toEqual(["create", "create"]);
+    expect(safety.getPlan().map((e) => e.path)).toEqual(
+      expect.arrayContaining([
+        abs("app/shared/config/redis.config.js"),
+        abs(".env.example"),
+      ])
+    );
   });
 });

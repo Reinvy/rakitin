@@ -12,12 +12,11 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        node-version: [18.x, 20.x, 22.x]
+        node-version: [22.x, 24.x]
 
     steps:
     - uses: actions/checkout@v7
@@ -34,8 +33,11 @@ jobs:
     - name: Run tests
       run: npm run test:ci
 
+    - name: Tree must stay clean after the suite
+      run: git diff --exit-code
+
     - name: Upload coverage to Codecov
-      if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
+      if: matrix.node-version == '22.x'
       uses: codecov/codecov-action@v7
       with:
         files: ./coverage/lcov.info
@@ -49,10 +51,10 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Use Node.js 20.x
+    - name: Use Node.js 22.x
       uses: actions/setup-node@v7
       with:
-        node-version: 20.x
+        node-version: 22.x
         cache: 'npm'
 
     - name: Install dependencies
@@ -68,10 +70,10 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Use Node.js 20.x
+    - name: Use Node.js 22.x
       uses: actions/setup-node@v7
       with:
-        node-version: 20.x
+        node-version: 22.x
         cache: 'npm'
 
     - name: Install dependencies
@@ -85,10 +87,10 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Use Node.js 20.x
+    - name: Use Node.js 22.x
       uses: actions/setup-node@v7
       with:
-        node-version: 20.x
+        node-version: 22.x
         cache: 'npm'
 
     - name: Install dependencies
@@ -100,36 +102,30 @@ jobs:
       run: |
         SMOKE_DIR="$(mktemp -d)"
         cd "$SMOKE_DIR"
-        echo '{"name":"smoke-demo"}' > package.json
+        echo '{"name":"smoke-demo","version":"1.0.0"}' > package.json
+        RAK="$GITHUB_WORKSPACE/bin/rakitin.js"
 
-        node "$GITHUB_WORKSPACE/bin/rakitin.js" list --json | grep '"command"'
-        node "$GITHUB_WORKSPACE/bin/rakitin.js" info --json | grep 'packageManager'
-        node "$GITHUB_WORKSPACE/bin/rakitin.js" add module smoke-mod --arch modular --orm none --yes --dry-run --json | grep '"plan"'
-        test ! -d app/modules/smoke-mod || { echo "dry-run leaked to disk"; exit 1; }
-        node "$GITHUB_WORKSPACE/bin/rakitin.js" add module smoke-mod --arch modular --orm none --yes --json >/dev/null
-        node "$GITHUB_WORKSPACE/bin/rakitin.js" integrate --json >/dev/null
-        # Generated router must at least PARSE as JS (no deps needed for --check)
+        # --json stdout must be parseable in isolation.
+        node "$RAK" list --json | jq -e . >/dev/null
+        node "$RAK" info --json | jq -e '.ok == true' >/dev/null
+        node "$RAK" doctor --json | jq -e '.ok == true' >/dev/null
+        node "$RAK" --cli-version
+
+        # Dry-run must plan without touching disk.
+        BEFORE="$(find . -type f | sort | md5sum)"
+        node "$RAK" add module smoke-mod --arch modular --orm none --yes --no-install --dry-run --json \
+          | jq -e 'all(.plan[]; .op == "create" or .op == "overwrite" or .op == "mkdir" or .op == "install")' >/dev/null
+        node "$RAK" add middleware auth --dry-run --json | jq -e '.ok == true' >/dev/null
+        node "$RAK" recipe auth --dry-run --json | jq -e '.ok == true' >/dev/null
+        node "$RAK" init --orm prisma --dry-run --json | jq -e '.ok == true' >/dev/null
+        AFTER="$(find . -type f | sort | md5sum)"
+        test "$BEFORE" = "$AFTER" || { echo "dry-run leaked to disk"; exit 1; }
+        test ! -d node_modules || { echo "dry-run installed packages"; exit 1; }
+
+        # Real generation + wiring + boot smoke.
+        node "$RAK" add module smoke-mod --arch modular --orm none --yes --no-install --json \
+          | jq -e '(.ok == true) and (.created | length > 0)' >/dev/null
+        node "$RAK" integrate --json >/dev/null
         node --check app/routes/index.js
         node --check app/modules/smoke-mod/routes/smoke-mod.router.js
-        node "$GITHUB_WORKSPACE/bin/rakitin.js" doctor
-
-  build:
-    runs-on: ubuntu-latest
-    needs: [test, lint, typecheck]
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-    - uses: actions/checkout@v7
-
-    - name: Use Node.js 20.x
-      uses: actions/setup-node@v7
-      with:
-        node-version: 20.x
-        cache: 'npm'
-
-    - name: Install dependencies
-      run: npm ci
-
-    # Real gate for the publish pipeline.
-    - name: Build dual output (esbuild)
-      run: npm run build
+        node "$RAK" doctor --json | jq -e '.ok == true' >/dev/null

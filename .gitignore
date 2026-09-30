@@ -35,11 +35,14 @@ Thumbs.db
 
 # Testing
 coverage/
+tests/project/
 
 # Additional Ignore
 public/uploads/
-app
-prisma
+/app/
+/prisma/
+/examples/*/app/
+/examples/*/prisma/
 /lib/generated/prisma
 
 # Local agent tooling scratch files (not part of the product)

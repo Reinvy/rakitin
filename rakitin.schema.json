@@ -2,36 +2,56 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/Reinvy/rakitin/main/rakitin.schema.json",
   "title": "rakitin configuration",
-  "description": "Configuration written by `rakitin init` and consumed by subsequent commands to inherit project conventions.",
+  "description": "Configuration written by `rakitin init` (v3) and consumed by every subsequent command to inherit project conventions.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["preset", "version"],
+  "required": ["version"],
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL of this schema, so editors can validate the file."
+    },
+    "version": {
+      "type": "integer",
+      "const": 3,
+      "description": "Config file schema version."
+    },
     "preset": {
       "type": "string",
       "enum": ["basic", "intermediate", "advanced"],
       "description": "Integration tier the project was initialized with."
     },
-    "version": {
-      "type": "integer",
-      "const": 2,
-      "description": "Config file schema version."
-    },
-    "detected": {
-      "type": "object",
-      "description": "Snapshot of the project state at init time (informational).",
-      "properties": {
-        "expressVersion": { "type": ["string", "null"] },
-        "packageManager": { "type": ["string", "null"], "enum": ["npm", "pnpm", "yarn", "bun", null] },
-        "modules": { "type": "integer", "minimum": 0 },
-        "mixedArchitectures": { "type": "boolean" }
-      },
-      "additionalProperties": false
-    },
-    "generatedAt": {
+    "arch": {
       "type": "string",
-      "format": "date-time",
-      "description": "ISO timestamp when this config was written."
+      "enum": ["simple", "modular"],
+      "description": "Default module architecture."
+    },
+    "orm": {
+      "type": "string",
+      "enum": ["none", "prisma", "sequelize", "mongoose", "typeorm"],
+      "description": "Default ORM / database layer."
+    },
+    "packageManager": {
+      "type": "string",
+      "enum": ["npm", "pnpm", "yarn", "bun"],
+      "description": "Package manager used for dependency installs."
+    },
+    "autoIntegrateRouter": {
+      "type": "boolean",
+      "description": "Automatically wire new modules into the main router."
+    },
+    "generateValidationLayer": {
+      "type": "boolean",
+      "description": "Generate joi validation modules by default."
+    },
+    "generateTestFiles": {
+      "type": "boolean",
+      "description": "Generate Jest test files alongside new modules."
+    },
+    "plugins": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "rakitin plugins to load (package name or relative path)."
     }
   }
 }

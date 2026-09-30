@@ -1,96 +1,186 @@
 /**
- * Architecture generator tests - REAL disk execution in an isolated cwd
- * (per-suite mkdtemp from setup.js). Generated files are syntax-checked.
+ * Architecture generator tests - real disk execution in the per-suite temp
+ * dir (tests/setup.js sets process.cwd() to it). Generated JS is compiled
+ * with `vm.Script`; files are never `require()`d.
  */
-const fs = require("fs-extra");
+
+const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
-const { simpleArch } = require("../../../lib/generator/module/arch/simple.arch");
-const { modularArch } = require("../../../lib/generator/module/arch/modular.arch");
+const { simpleArch, modularArch } = require("../../../lib/generator/module/arch/arch");
+const {
+  RESOURCE_BLOCK_START,
+  RESOURCE_BLOCK_END,
+} = require("../../../lib/safety");
 
-function modulesPathFor(name) {
-  const { getPaths } = require("../../../lib/constants");
-  return path.join(getPaths().modulesPath, name);
-}
+const CRUD_VERBS = ["getAll", "getById", "create", "update", "remove"];
 
-/** Strip CommonJS requires so vm.Script can compile fragments standalone. */
+const abs = (rel) => path.join(global.tempDir, rel);
+const read = (rel) => fs.readFileSync(abs(rel), "utf8");
+
+/** Strip CommonJS requires so a fragment compiles standalone. */
 function stripRequires(src) {
   return src.replace(/require\([^)]*\)/g, "({})");
 }
 
-describe("simpleArch", () => {
-  afterEach(() => jest.restoreAllMocks());
+function expectParses(rel) {
+  expect(() => new vm.Script(stripRequires(read(rel)))).not.toThrow();
+}
 
-  test("creates controller, service, router for a hyphenated module", async () => {
-    jest.spyOn(console, "log").mockImplementation(() => {});
+/** `exports.<verb> = …` names, in source order. */
+function controllerVerbs(rel) {
+  return [...read(rel).matchAll(/^exports\.(\w+) =/gm)].map((m) => m[1]);
+}
 
-    await simpleArch("user-profile", "None");
+/** `router.<method>("<path>", controller.<verb>)` descriptors. */
+function routerRoutes(rel) {
+  return [...read(rel).matchAll(/router\.(\w+)\("([^"]*)", controller\.(\w+)\)/g)].map((m) => ({
+    method: m[1],
+    path: m[2],
+    verb: m[3],
+  }));
+}
 
-    const dir = modulesPathFor("user-profile");
-    expect(fs.existsSync(path.join(dir, "user-profile.controller.js"))).toBe(true);
-    expect(fs.existsSync(path.join(dir, "user-profile.service.js"))).toBe(true);
-    expect(fs.existsSync(path.join(dir, "user-profile.router.js"))).toBe(true);
+const FULL_ROUTES = [
+  { method: "get", path: "/" },
+  { method: "get", path: "/:id" },
+  { method: "post", path: "/" },
+  { method: "put", path: "/:id" },
+  { method: "delete", path: "/:id" },
+];
 
-    // Generated service uses the no-ORM in-memory store (B1)
-    const service = fs.readFileSync(path.join(dir, "user-profile.service.js"), "utf8");
-    expect(service).toContain("USERPROFILE_STORE");
-  });
+describe("module architecture generators", () => {
+  describe("simpleArch", () => {
+    test("returns { created, skipped } with root-relative paths that exist", async () => {
+      const result = await simpleArch("user-profile", "None");
 
-  test("is idempotent - existing files are not overwritten", async () => {
-    await simpleArch("blog", "None");
-
-    const dir = modulesPathFor("blog");
-    const markerFile = path.join(dir, "blog.controller.js");
-    fs.writeFileSync(markerFile, "// CUSTOM USER CODE", "utf8");
-
-    await simpleArch("blog", "None");
-    expect(fs.readFileSync(markerFile, "utf8")).toBe("// CUSTOM USER CODE");
-  });
-
-  test("throws on invalid module name", async () => {
-    await expect(simpleArch("", "None")).rejects.toThrow();
-  });
-});
-
-describe("modularArch", () => {
-  afterEach(() => jest.restoreAllMocks());
-
-  test("creates controllers/services/models/routes subdirectories", async () => {
-    jest.spyOn(console, "log").mockImplementation(() => {});
-
-    await modularArch("order-item", "Mongoose");
-
-    const dir = modulesPathFor("order-item");
-    ["controllers", "services", "models", "routes"].forEach((sub) => {
-      expect(fs.existsSync(path.join(dir, sub))).toBe(true);
+      expect(Object.keys(result).sort()).toEqual(["created", "skipped"]);
+      expect(result.skipped).toEqual([]);
+      expect(result.created.sort()).toEqual([
+        "app/modules/user-profile/user-profile.controller.js",
+        "app/modules/user-profile/user-profile.router.js",
+        "app/modules/user-profile/user-profile.service.js",
+      ]);
+      for (const rel of result.created) {
+        expect(path.isAbsolute(rel)).toBe(false);
+        expect(fs.existsSync(abs(rel))).toBe(true);
+      }
+      // The simple architecture never writes a model file.
+      expect(fs.existsSync(abs("app/modules/user-profile/models"))).toBe(false);
     });
 
-    const controllerSrc = fs.readFileSync(
-      path.join(dir, "controllers", "order-item.controller.js"),
-      "utf8"
-    );
-    const routerSrc = fs.readFileSync(
-      path.join(dir, "routes", "order-item.router.js"),
-      "utf8"
-    );
-    // Parse-check both fragments
-    expect(() => new vm.Script(stripRequires(controllerSrc))).not.toThrow();
-    expect(() => new vm.Script(stripRequires(routerSrc))).not.toThrow();
+    test("emits the full CRUD verb set in controller and router", async () => {
+      await simpleArch("blog", "None");
 
-    // Mongoose naming consistency: kebab-case model file + import
-    const serviceSrc = fs.readFileSync(
-      path.join(dir, "services", "order-item.service.js"),
-      "utf8"
-    );
-    expect(serviceSrc).toContain("../models/order-item.model");
+      const controller = "app/modules/blog/blog.controller.js";
+      const router = "app/modules/blog/blog.router.js";
+
+      expect(controllerVerbs(controller)).toEqual(CRUD_VERBS);
+      expect(routerRoutes(router).map(({ method, path: p }) => ({ method, path: p }))).toEqual(
+        FULL_ROUTES
+      );
+      expect(routerRoutes(router).map((r) => r.verb)).toEqual(CRUD_VERBS);
+
+      expect(read(router)).toContain(RESOURCE_BLOCK_START);
+      expect(read(router)).toContain(RESOURCE_BLOCK_END);
+      expectParses(controller);
+      expectParses(router);
+    });
+
+    test("renders only getAll/getById for --template readonly", async () => {
+      await simpleArch("report", "None", { template: "readonly" });
+
+      expect(controllerVerbs("app/modules/report/report.controller.js")).toEqual([
+        "getAll",
+        "getById",
+      ]);
+      expect(routerRoutes("app/modules/report/report.router.js")).toEqual([
+        { method: "get", path: "/", verb: "getAll" },
+        { method: "get", path: "/:id", verb: "getById" },
+      ]);
+    });
+
+    test("rejects an unknown template", async () => {
+      await expect(simpleArch("oops", "None", { template: "nope" })).rejects.toThrow(
+        /Template tidak dikenal: "nope"\. Pilih salah satu: crud, readonly, graphql, realtime\./
+      );
+    });
+
+    test("is idempotent: a rerun reports the same files as skipped", async () => {
+      await simpleArch("invoice", "None");
+      const second = await simpleArch("invoice", "None");
+
+      expect(second.created).toEqual([]);
+      expect(second.skipped.sort()).toEqual([
+        "app/modules/invoice/invoice.controller.js",
+        "app/modules/invoice/invoice.router.js",
+        "app/modules/invoice/invoice.service.js",
+      ]);
+    });
+
+    test("rejects unsafe module names and unknown ORMs", async () => {
+      await expect(simpleArch("../evil", "None")).rejects.toThrow(/Nama module tidak valid/);
+      await expect(simpleArch("ok", "MongoDB")).rejects.toThrow(/ORM tidak valid/);
+    });
   });
 
-  test("is idempotent across repeated generation", async () => {
-    await modularArch("invoice", "None");
-    const modelFile = path.join(modulesPathFor("invoice"), "models", "invoice.model.js");
-    fs.writeFileSync(modelFile, "// TUNED BY USER", "utf8");
+  describe("modularArch", () => {
+    test("writes controllers/services/routes and a model placeholder for ORM None", async () => {
+      const result = await modularArch("order-item", "None");
 
-    await modularArch("invoice", "None");
-    expect(fs.readFileSync(modelFile, "utf8")).toBe("// TUNED BY USER");
+      expect(result.created.sort()).toEqual([
+        "app/modules/order-item/controllers/order-item.controller.js",
+        "app/modules/order-item/models/order-item.model.js",
+        "app/modules/order-item/routes/order-item.router.js",
+        "app/modules/order-item/services/order-item.service.js",
+      ]);
+      for (const rel of result.created) expect(fs.existsSync(abs(rel))).toBe(true);
+    });
+
+    test("emits the full CRUD verb set and both resource markers", async () => {
+      await modularArch("product", "None");
+
+      const controller = "app/modules/product/controllers/product.controller.js";
+      const router = "app/modules/product/routes/product.router.js";
+
+      expect(controllerVerbs(controller)).toEqual(CRUD_VERBS);
+      expect(routerRoutes(router).map((r) => r.verb)).toEqual(CRUD_VERBS);
+      expect(read(router)).toContain(RESOURCE_BLOCK_START);
+      expect(read(router)).toContain(RESOURCE_BLOCK_END);
+      expectParses(controller);
+      expectParses(router);
+      expectParses("app/modules/product/services/product.service.js");
+    });
+
+    test("renders only getAll/getById for --template readonly", async () => {
+      await modularArch("analytics", "None", { template: "readonly" });
+
+      expect(controllerVerbs("app/modules/analytics/controllers/analytics.controller.js")).toEqual(
+        ["getAll", "getById"]
+      );
+      expect(routerRoutes("app/modules/analytics/routes/analytics.router.js")).toEqual([
+        { method: "get", path: "/", verb: "getAll" },
+        { method: "get", path: "/:id", verb: "getById" },
+      ]);
+    });
+
+    test("never writes the placeholder model for a real ORM (F-2 regression guard)", async () => {
+      for (const orm of ["Sequelize", "Mongoose", "Prisma", "TypeORM"]) {
+        const result = await modularArch(`no-placeholder-${orm.toLowerCase()}`, orm);
+
+        const modelPath = `app/modules/no-placeholder-${orm.toLowerCase()}/models/no-placeholder-${orm.toLowerCase()}.model.js`;
+        expect(result.created).not.toContain(modelPath);
+        expect(result.skipped).not.toContain(modelPath);
+        expect(fs.existsSync(abs(modelPath))).toBe(false);
+      }
+    });
+
+    test("is idempotent: a rerun reports every file as skipped", async () => {
+      await modularArch("ledger", "None");
+      const second = await modularArch("ledger", "None");
+
+      expect(second.created).toEqual([]);
+      expect(second.skipped).toHaveLength(4);
+    });
   });
 });

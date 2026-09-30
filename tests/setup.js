@@ -1,31 +1,77 @@
-// Global setup for Jest tests
+// Global setup for Jest tests.
+//
+// Two guarantees this file enforces:
+//   1. Each test SUITE gets its own temp dir inside the OS tmpdir and
+//      process.cwd() points at it - nothing is written into the repo.
+//   2. The repo itself must be byte-identical before/after a suite:
+//      package.json / package-lock.json are hashed and compared.
+
 const os = require("os");
 const fs = require("fs-extra");
 const path = require("path");
+const crypto = require("crypto");
 
-// Each test SUITE gets its OWN temporary directory inside the OS tmpdir.
-// Sharing a single directory across parallel Jest workers caused ENOENT
-// races whenever one worker wiped contents while another was scanning.
+// Every suite is hermetic: real child processes are blocked unless a suite
+// explicitly opts in (tests/e2e spawns the CLI binary on purpose).
+jest.mock("child_process");
+
+const REPO_ROOT = path.resolve(__dirname, "..");
+const GUARDED_REPO_FILES = ["package.json", "package-lock.json"];
+
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rakitin-test-"));
 global.tempDir = tempDir;
 
 // Store original console for tests that need it
 const originalConsole = { ...console };
 
+function hashFile(filePath) {
+  if (!fs.existsSync(filePath)) return "missing";
+  return crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(filePath))
+    .digest("hex");
+}
+
+function snapshotRepoFiles() {
+  const snapshot = {};
+  for (const name of GUARDED_REPO_FILES) {
+    snapshot[name] = hashFile(path.join(REPO_ROOT, name));
+  }
+  return snapshot;
+}
+
+let repoSnapshotBefore = null;
+
 beforeAll(async () => {
-  // Ensure temp directory exists
   await fs.ensureDir(tempDir);
 
+  repoSnapshotBefore = snapshotRepoFiles();
+
   // Store original cwd for cleanup.
-  // NOTE: use a PLAIN function (not jest.fn) - jest.config resets all mocks
-  // between tests (`resetMocks: true`) which would strip its implementation,
-  // leaving process.cwd() returning undefined for the rest of the suite.
+  // NOTE: use a PLAIN function (not jest.fn) - jest.config clears mock call
+  // history between tests which would strip its implementation and leave
+  // process.cwd() returning undefined for the rest of the suite.
   const originalCwd = process.cwd;
   global.originalCwd = originalCwd;
   process.cwd = () => tempDir;
 });
 
 afterAll(async () => {
+  // Repo integrity: a suite that mutated the repository is a failure, not a
+  // side effect to clean up afterwards.
+  if (repoSnapshotBefore) {
+    const after = snapshotRepoFiles();
+    const mutated = GUARDED_REPO_FILES.filter(
+      (name) => after[name] !== repoSnapshotBefore[name]
+    );
+    if (mutated.length) {
+      throw new Error(
+        `[hermetic] test run memodifikasi ${mutated.join(", ")}; ` +
+          "tests must never write into the repository"
+      );
+    }
+  }
+
   // Restore original process.cwd
   if (global.originalCwd) {
     process.cwd = global.originalCwd;
@@ -40,13 +86,12 @@ afterAll(async () => {
 beforeEach(async () => {
   try {
     const installer = require("../lib/installer");
-    installer.internals.execCommand = jest.fn().mockResolvedValue({
-      success: true,
-      stdout: "",
-      stderr: "",
-    });
+    const stub = () =>
+      jest.fn().mockResolvedValue({ success: true, stdout: "", stderr: "", code: 0 });
+    installer.internals.execCommand = stub();
+    installer.internals.spawn = stub();
   } catch (_) {
-    // ignore
+    // ignore: suite may load before the installer exists
   }
 });
 
@@ -69,16 +114,6 @@ afterEach(async () => {
     Logger.clearInstances();
   } catch (e) {
     // Logger module might not be loaded yet
-  }
-
-  // Clear PathCache
-  try {
-    const utils = require("../lib/utils");
-    if (utils.clearPathCache) {
-      utils.clearPathCache();
-    }
-  } catch (e) {
-    // Utils module might not be loaded yet
   }
 });
 

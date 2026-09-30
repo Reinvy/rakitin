@@ -1,11 +1,12 @@
 /**
- * Integration: directory structure produced by generators on REAL disk.
+ * Integration: the on-disk directory structure produced by the v3 module
+ * generators, plus the returned `{created, skipped}` contract.
  */
 const fs = require("fs-extra");
 const path = require("path");
 const { getPaths } = require("../../lib/constants");
-const { ensureBaseStructure } = require("../../lib/utils");
 const { simpleArch, modularArch } = require("../../lib/generator/module/arch/arch");
+const prisma = require("../../lib/generator/module/orm/prisma.orm");
 
 beforeEach(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});
@@ -15,39 +16,59 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe("Directory Structure (real disk)", () => {
-  test("ensureBaseStructure creates the conventional app/ skeleton", () => {
-    ensureBaseStructure();
+function rel(...segments) {
+  return segments.join("/");
+}
 
-    const p = getPaths();
-    expect(fs.existsSync(p.modulesPath)).toBe(true);
-    expect(fs.existsSync(p.sharedPath)).toBe(true);
-    ["middlewares", "config", "utils", "interfaces"].forEach((sub) => {
-      expect(fs.existsSync(path.join(p.sharedPath, sub))).toBe(true);
-    });
-    expect(fs.existsSync(path.join(p.basePath, "app.js"))).toBe(true);
-    expect(fs.existsSync(path.join(p.basePath, "server.js"))).toBe(true);
+describe("Directory Structure (real disk)", () => {
+  test("getPaths resolves the app skeleton under the project root", () => {
+    const p = getPaths(global.tempDir);
+    expect(p.basePath).toBe(path.join(global.tempDir, "app"));
+    expect(p.modulesPath).toBe(path.join(global.tempDir, "app", "modules"));
+    expect(p.sharedPath).toBe(path.join(global.tempDir, "app", "shared"));
+    expect(p.appRoutesPath).toBe(path.join(global.tempDir, "app", "routes"));
+    expect(p.prismaPath).toBe(path.join(global.tempDir, "prisma", "schema"));
   });
 
-  test("simpleArch produces flat module files under modules/<name>", async () => {
-    await simpleArch("payment", "None");
+  test("simpleArch produces flat module files and reports them as created", async () => {
+    const result = await simpleArch("payment", "None");
 
     const dir = path.join(getPaths().modulesPath, "payment");
-    ["payment.controller.js", "payment.service.js", "payment.router.js"].forEach((f) =>
-      expect(fs.existsSync(path.join(dir, f))).toBe(true)
+    for (const file of [
+      "payment.controller.js",
+      "payment.service.js",
+      "payment.router.js",
+    ]) {
+      expect(fs.existsSync(path.join(dir, file))).toBe(true);
+    }
+    expect(result.created.sort()).toEqual(
+      [
+        "app/modules/payment/payment.controller.js",
+        "app/modules/payment/payment.router.js",
+        "app/modules/payment/payment.service.js",
+      ].sort()
     );
+    expect(result.skipped).toEqual([]);
   });
 
   test("modularArch produces the four-layer structure", async () => {
     await modularArch("shipping", "None");
 
     const dir = path.join(getPaths().modulesPath, "shipping");
-    ["controllers", "services", "models", "routes"].forEach((d) =>
-      expect(fs.existsSync(path.join(dir, d))).toBe(true)
-    );
-    expect(fs.existsSync(path.join(dir, "controllers", "shipping.controller.js"))).toBe(
-      true
-    );
+    for (const sub of ["controllers", "services", "models", "routes"]) {
+      expect(fs.existsSync(path.join(dir, sub))).toBe(true);
+    }
+    expect(fs.existsSync(path.join(dir, "controllers", "shipping.controller.js"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "services", "shipping.service.js"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "routes", "shipping.router.js"))).toBe(true);
+  });
+
+  test("REGRESSION: real ORMs never get the None placeholder model", async () => {
+    const result = await modularArch("order", "Sequelize");
+
+    const dir = path.join(getPaths().modulesPath, "order");
+    expect(fs.existsSync(path.join(dir, "models", "order.model.js"))).toBe(false);
+    expect(result.created).not.toContain("app/modules/order/models/order.model.js");
   });
 
   test("module names normalize consistently across arch layers", async () => {
@@ -63,16 +84,29 @@ describe("Directory Structure (real disk)", () => {
     expect(fs.existsSync(path.join(dir, "stock-level-report.controller.js"))).toBe(true);
   });
 
-  test("Prisma model files live under prisma/schema and services reference shared db config", async () => {
-    const { prismaORM } = require("../../lib/generator/module/orm/prisma.orm");
-    const childProc = require("child_process");
-    jest.spyOn(childProc, "execSync").mockImplementation(() => "");
+  test("re-running a generator reports everything as skipped", async () => {
+    await simpleArch("billing", "None");
+    const second = await simpleArch("billing", "None");
 
-    await prismaORM("audit-log");
+    expect(second.created).toEqual([]);
+    expect(second.skipped.length).toBe(3);
+    for (const entry of second.skipped) {
+      expect(entry.startsWith("app/modules/billing/")).toBe(true);
+      expect(fs.existsSync(path.join(global.tempDir, entry))).toBe(true);
+    }
+  });
 
-    const p = getPaths();
-    expect(fs.existsSync(path.join(p.prismaPath, "base.prisma"))).toBe(true);
-    expect(fs.existsSync(path.join(p.prismaPath, "audit-log.prisma"))).toBe(true);
-    expect(fs.existsSync(path.join(p.sharedPath, "config", "db.js"))).toBe(true);
+  test("prisma helpers live under prisma/schema and shared/config", async () => {
+    const base = prisma.ensurePrismaBaseSchema(global.tempDir);
+    const db = prisma.ensurePrismaDbConfig(global.tempDir);
+
+    expect(fs.existsSync(path.join(global.tempDir, rel("prisma", "schema", "base.prisma")))).toBe(
+      true
+    );
+    expect(fs.existsSync(path.join(global.tempDir, rel("app", "shared", "config", "db.js")))).toBe(
+      true
+    );
+    expect(base.path.endsWith(path.join("prisma", "schema", "base.prisma"))).toBe(true);
+    expect(db.path.endsWith(path.join("app", "shared", "config", "db.js"))).toBe(true);
   });
 });

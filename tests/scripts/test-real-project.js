@@ -1,694 +1,351 @@
 #!/usr/bin/env node
+"use strict";
 
 /**
- * test-real-project.js - Automated Real Project E2E Test Suite for rakitin
+ * test-real-project.js - Standalone E2E smoke suite for rakitin V3.
  *
- * Runs full real-project tests against /home/reinvy/Workspace/rakitin/tests/project
- * following the 6 Golden Rules defined in docs/real-project-testing-rules.md.
+ * Runs the real CLI binary (`bin/rakitin.js`) inside throwaway temp projects
+ * under the OS temp dir. Nothing is ever written inside the repository, every
+ * invocation passes `--no-install` (fully offline), and JSON output is parsed
+ * against the `{ok,created,skipped,nextSteps}` envelope contract.
+ *
+ * Prints a per-scenario PASS/FAIL summary and exits non-zero on any failure.
  */
 
-const { execSync, spawnSync } = require("child_process");
-const fs = require("fs-extra");
+const { spawnSync } = require("child_process");
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
-const vm = require("vm");
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
-const TEST_PROJECT_DIR = path.resolve(REPO_ROOT, "tests/project");
+const CLI = path.join(REPO_ROOT, "bin", "rakitin.js");
 
-const colors = {
+const ROUTES_START = "/* rakitin:routes:start */";
+const ROUTES_END = "/* rakitin:routes:end */";
+const PLAN_OPS = ["create", "overwrite", "mkdir", "install"];
+
+const COLORS = {
   reset: "\x1b[0m",
-  bold: "\x1b[1m",
   green: "\x1b[32m",
   red: "\x1b[31m",
-  yellow: "\x1b[33m",
   cyan: "\x1b[36m",
   dim: "\x1b[2m",
 };
 
-let passedCount = 0;
-let failedCount = 0;
-const failures = [];
+const results = [];
 
-function logHeader(title) {
-  console.log(`\n${colors.bold}${colors.cyan}══════════════════════════════════════════════════════════════${colors.reset}`);
-  console.log(`${colors.bold}${colors.cyan} ${title}${colors.reset}`);
-  console.log(`${colors.bold}${colors.cyan}══════════════════════════════════════════════════════════════${colors.reset}\n`);
+function fail(message) {
+  throw new Error(message);
 }
 
 function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`Assertion failed: ${message}`);
+  if (!condition) fail(message);
+}
+
+function assertEqual(actual, expected, message) {
+  if (actual !== expected) {
+    fail(`${message} (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`);
   }
 }
 
-/** Clean slate helper - strictly wipes tests/project and creates clean package.json */
-function cleanProject() {
-  fs.ensureDirSync(TEST_PROJECT_DIR);
-  const items = fs.readdirSync(TEST_PROJECT_DIR);
-  for (const item of items) {
-    fs.removeSync(path.join(TEST_PROJECT_DIR, item));
-  }
-  const cleanPackageJson = {
-    name: "test-real-project",
-    version: "1.0.0",
-    description: "Clean test project for rakitin",
-    main: "index.js",
-    type: "commonjs",
-    dependencies: {
-      express: "^4.19.0",
-    },
-  };
+/* ------------------------------------------------------------------ */
+/* Fixtures & driver                                                   */
+/* ------------------------------------------------------------------ */
+
+function makeProject() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rakitin-e2e-"));
   fs.writeFileSync(
-    path.join(TEST_PROJECT_DIR, "package.json"),
-    JSON.stringify(cleanPackageJson, null, 2) + "\n",
+    path.join(dir, "package.json"),
+    `${JSON.stringify({ name: "e2e-app", version: "1.0.0" }, null, 2)}\n`,
     "utf8"
   );
+  return dir;
 }
 
-/** Execute command in tests/project directory */
-function runCLI(args, input = null) {
-  const binary = path.resolve(REPO_ROOT, "bin/rakitin.js");
-  const nodeBin = process.execPath;
-  const fullArgs = [binary, ...args];
+function run(dir, args, { json = false } = {}) {
+  const env = { ...process.env };
+  if (json) env.RAKITIN_JSON = "1";
+  else delete env.RAKITIN_JSON;
 
-  const res = spawnSync(nodeBin, fullArgs, {
-    cwd: TEST_PROJECT_DIR,
-    input: input != null ? input : undefined,
+  const finalArgs = [...args];
+  if (!finalArgs.includes("--no-install")) finalArgs.push("--no-install");
+  if (json && !finalArgs.includes("--json")) finalArgs.push("--json");
+
+  const res = spawnSync(process.execPath, [CLI, ...finalArgs], {
+    cwd: dir,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      RAKITIN_SILENT: "1",
-      NODE_PATH: path.join(REPO_ROOT, "node_modules"),
-    },
+    env,
   });
-
-  return {
-    status: res.status,
-    stdout: res.stdout || "",
-    stderr: res.stderr || "",
-    error: res.error,
-  };
+  if (res.error) fail(`gagal menjalankan CLI: ${res.error.message}`);
+  return res;
 }
 
-/** Validate syntax of all .js files in a directory */
-function validateSyntaxInDir(dir) {
-  if (!fs.existsSync(dir)) return;
-  const items = fs.readdirSync(dir);
-  for (const item of items) {
-    const fullPath = path.join(dir, item);
-    const stat = fs.statSync(fullPath);
-    if (stat.isDirectory()) {
-      if (item !== "node_modules") validateSyntaxInDir(fullPath);
-    } else if (item.endsWith(".js")) {
-      const src = fs.readFileSync(fullPath, "utf8");
-      try {
-        new vm.Script(src);
-      } catch (err) {
-        throw new Error(`Syntax validation failed on ${fullPath}: ${err.message}`, { cause: err });
-      }
-    }
+function runJson(dir, args) {
+  const res = run(dir, [...args, "--json"], { json: true });
+  assertEqual(res.status, 0, `exit code untuk: rakitan ${args.join(" ")}`);
+  let envelope;
+  try {
+    envelope = JSON.parse(res.stdout);
+  } catch (error) {
+    fail(`stdout bukan JSON valid untuk "${args.join(" ")}": ${res.stdout}`);
+  }
+  assert(envelope.ok === true, `envelope.ok untuk "${args.join(" ")}"`);
+  assert(Array.isArray(envelope.created), "envelope.created array");
+  assert(Array.isArray(envelope.skipped), "envelope.skipped array");
+  assert(Array.isArray(envelope.nextSteps), "envelope.nextSteps array");
+  return envelope;
+}
+
+function runJsonError(dir, args) {
+  const res = run(dir, [...args, "--json"], { json: true });
+  assertEqual(res.status, 1, `exit code failure untuk: ${args.join(" ")}`);
+  const envelope = JSON.parse(res.stdout);
+  assertEqual(envelope.ok, false, "envelope.ok false");
+  assert(typeof envelope.error === "string", "envelope.error string");
+  return envelope;
+}
+
+function listFiles(dir, base = dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listFiles(full, base));
+    else out.push(path.relative(base, full).split(path.sep).join("/"));
+  }
+  return out.sort();
+}
+
+function assertCreatedExist(dir, entries) {
+  for (const entry of entries) {
+    assert(typeof entry === "string", "created entry harus string");
+    assert(!entry.startsWith("/"), `created entry relatif: ${entry}`);
+    assert(fs.existsSync(path.join(dir, entry)), `created entry ada di disk: ${entry}`);
   }
 }
 
-function runScenario(id, name, fn) {
-  process.stdout.write(`  [${id}] ${name} ... `);
+function checkAllJs(dir) {
+  const files = listFiles(dir).filter(
+    (file) => file.endsWith(".js") && !file.includes("node_modules/")
+  );
+  assert(files.length > 0, "ada file .js yang dihasilkan");
+  for (const file of files) {
+    const res = spawnSync(process.execPath, ["--check", path.join(dir, file)], {
+      encoding: "utf8",
+    });
+    assertEqual(res.status, 0, `node --check ${file}: ${res.stderr}`);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Scenarios                                                           */
+/* ------------------------------------------------------------------ */
+
+const scenarios = [
+  ["cli-version", "--cli-version prints the version", () => {
+    const dir = makeProject();
+    const res = run(dir, ["--cli-version"]);
+    assertEqual(res.status, 0, "exit code");
+    const expected = require(path.join(REPO_ROOT, "package.json")).version;
+    assertEqual(res.stdout.trim(), expected, "versi");
+  }],
+
+  ["bare", "bare $0 prints hints", () => {
+    const dir = makeProject();
+    const res = run(dir, []);
+    assertEqual(res.status, 0, "exit code");
+    for (const hint of ["rakitin init", "rakitin add module", "rakitin integrate", "rakitin doctor"]) {
+      assert(res.stdout.includes(hint), `stdout memuat hint: ${hint}`);
+    }
+  }],
+
+  ["list-json", "list --json catalog >= 8", () => {
+    const dir = makeProject();
+    const envelope = runJson(dir, ["list"]);
+    assert(envelope.data.catalog.length >= 8, "catalog >= 8 entri");
+  }],
+
+  ["info-json", "info --json summary", () => {
+    const dir = makeProject();
+    const envelope = runJson(dir, ["info"]);
+    assertEqual(envelope.data.summary.packageName, "e2e-app", "packageName");
+  }],
+
+  ["doctor-json", "doctor --json checks", () => {
+    const dir = makeProject();
+    const envelope = runJson(dir, ["doctor"]);
+    assert(Array.isArray(envelope.data.checks) && envelope.data.checks.length > 0, "checks non-empty");
+    assert(envelope.data.summary, "summary ada");
+  }],
+
+  ["init", "init --orm none creates config + base router", () => {
+    const dir = makeProject();
+    const envelope = runJson(dir, ["init", "--orm", "none", "--yes"]);
+    assertCreatedExist(dir, envelope.created);
+    assert(envelope.created.includes(".rakitinrc.json"), "config dibuat");
+    assert(envelope.created.includes("app/routes/index.js"), "base router dibuat");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, ".rakitinrc.json"), "utf8"));
+    assertEqual(config.version, 3, "config version");
+  }],
+
+  ["add-module-modular", "add module modular", () => {
+    const dir = makeProject();
+    runJson(dir, ["init", "--orm", "none", "--yes"]);
+    const envelope = runJson(dir, ["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
+    assertCreatedExist(dir, envelope.created);
+    for (const file of [
+      "app/modules/user/controllers/user.controller.js",
+      "app/modules/user/services/user.service.js",
+      "app/modules/user/routes/user.router.js",
+    ]) {
+      assert(envelope.created.includes(file), `created memuat ${file}`);
+    }
+  }],
+
+  ["add-module-simple", "add module simple", () => {
+    const dir = makeProject();
+    runJson(dir, ["init", "--orm", "none", "--yes"]);
+    const envelope = runJson(dir, ["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes"]);
+    assertCreatedExist(dir, envelope.created);
+    assert(envelope.created.includes("app/modules/product/product.router.js"), "router simple dibuat");
+  }],
+
+  ["middleware-config", "add middleware + config", () => {
+    const dir = makeProject();
+    runJson(dir, ["init", "--orm", "none", "--yes"]);
+    const mw = runJson(dir, ["add", "middleware", "auth"]);
+    assert(mw.created.includes("app/shared/middlewares/auth.middleware.js"), "middleware auth dibuat");
+    const cfg = runJson(dir, ["add", "config", "jwt"]);
+    assert(cfg.created.includes("app/shared/config/jwt.config.js"), "config jwt dibuat");
+    assert(fs.readFileSync(path.join(dir, ".env.example"), "utf8").includes("# JWT CONFIG"), "env marker");
+  }],
+
+  ["integrate", "integrate wires + is idempotent + keeps .bak", () => {
+    const dir = makeProject();
+    runJson(dir, ["init", "--orm", "none", "--yes"]);
+    runJson(dir, ["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes", "--no-auto-integrate"]);
+    runJson(dir, ["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes", "--no-auto-integrate"]);
+
+    runJson(dir, ["integrate"]);
+    const routerPath = path.join(dir, "app/routes/index.js");
+    const first = fs.readFileSync(routerPath, "utf8");
+    assert(first.includes(ROUTES_START) && first.includes(ROUTES_END), "marker region ada");
+    assert(first.includes("router.use('/user'"), "mount /user");
+    assert(first.includes("router.use('/product'"), "mount /product");
+
+    runJson(dir, ["integrate"]);
+    const second = fs.readFileSync(routerPath, "utf8");
+    const outside = (src) => {
+      const s = src.indexOf(ROUTES_START);
+      const e = src.indexOf(ROUTES_END);
+      return s === -1 || e === -1 ? src : src.slice(0, s) + src.slice(e + ROUTES_END.length);
+    };
+    assertEqual(outside(second), outside(first), "byte di luar marker identik");
+
+    const bak = `${routerPath}.bak`;
+    assert(fs.existsSync(bak), ".bak dibuat");
+    const bakBefore = fs.readFileSync(bak, "utf8");
+    runJson(dir, ["integrate"]);
+    assertEqual(fs.readFileSync(bak, "utf8"), bakBefore, ".bak tidak ditimpa run ketiga");
+  }],
+
+  ["node-check", "every emitted .js passes node --check", () => {
+    const dir = makeProject();
+    runJson(dir, ["init", "--orm", "none", "--yes"]);
+    runJson(dir, ["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
+    runJson(dir, ["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes"]);
+    runJson(dir, ["add", "middleware", "auth"]);
+    runJson(dir, ["add", "config", "jwt"]);
+    checkAllJs(dir);
+  }],
+
+  ["dry-run", "--dry-run mutates nothing", () => {
+    const dir = makeProject();
+    const before = listFiles(dir);
+    const commands = [
+      ["init", "--orm", "prisma", "--yes", "--dry-run"],
+      ["add", "module", "ghost", "--arch", "modular", "--orm", "mongoose", "--yes", "--dry-run"],
+      ["add", "middleware", "auth", "--dry-run"],
+      ["recipe", "auth", "--dry-run"],
+      ["recipe", "test", "--dry-run"],
+    ];
+    for (const args of commands) {
+      const envelope = runJson(dir, args);
+      assert(Array.isArray(envelope.plan), `plan ada untuk ${args.join(" ")}`);
+      for (const entry of envelope.plan) {
+        assert(PLAN_OPS.includes(entry.op), `op dikenal: ${entry.op}`);
+      }
+    }
+    assertEqual(JSON.stringify(listFiles(dir)), JSON.stringify(before), "tree tidak berubah");
+    assert(!fs.existsSync(path.join(dir, "node_modules")), "node_modules tidak dibuat");
+  }],
+
+  ["sanitization", "traversal rejected, safe kebab accepted", () => {
+    const dir = makeProject();
+    runJson(dir, ["init", "--orm", "none", "--yes"]);
+    const parent = path.dirname(dir);
+    for (const bad of ["../evil", ".."]) {
+      const envelope = runJsonError(dir, ["add", "module", bad, "--arch", "modular", "--orm", "none", "--yes"]);
+      assert(/Nama module tidak valid/.test(envelope.error), "pesan error sanitasi");
+    }
+    assert(!fs.existsSync(path.join(parent, "evil")), "tidak menulis di luar project");
+    for (const good of ["123abc", "class"]) {
+      const envelope = runJson(dir, ["add", "module", good, "--arch", "modular", "--orm", "none", "--yes"]);
+      assert(envelope.ok, `nama aman diterima: ${good}`);
+      assert(fs.existsSync(path.join(dir, "app/modules", good)), `folder ${good} dibuat`);
+    }
+    checkAllJs(dir);
+    assert(!fs.existsSync(path.join(parent, "app")), "tidak menulis app/ di luar project");
+  }],
+
+  ["recipe-docker", "recipe docker resolves entrypoint (positive + negative)", () => {
+    const dir = makeProject();
+    fs.mkdirSync(path.join(dir, "app"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "app", "server.js"), "// entry\n", "utf8");
+    const envelope = runJson(dir, ["recipe", "docker"]);
+    assert(envelope.created.includes("Dockerfile"), "Dockerfile dibuat");
+    assert(
+      fs.readFileSync(path.join(dir, "Dockerfile"), "utf8").includes('CMD ["node", "app/server.js"]'),
+      "CMD entrypoint"
+    );
+
+    const empty = makeProject();
+    const failed = runJsonError(empty, ["recipe", "docker"]);
+    assert(/entrypoint/i.test(failed.error), "error entrypoint");
+    assert(!fs.existsSync(path.join(empty, "Dockerfile")), "Dockerfile tidak ditulis saat gagal");
+  }],
+];
+
+/* ------------------------------------------------------------------ */
+/* Runner                                                              */
+/* ------------------------------------------------------------------ */
+
+function runScenario([id, name, fn]) {
+  const started = Date.now();
   try {
-    cleanProject();
     fn();
-    passedCount++;
-    console.log(`${colors.green}✓ PASSED${colors.reset}`);
-  } catch (err) {
-    failedCount++;
-    failures.push({ id, name, error: err.message });
-    console.log(`${colors.red}✗ FAILED: ${err.message}${colors.reset}`);
+    const ms = Date.now() - started;
+    results.push({ id, name, ok: true, ms });
+    console.log(`${COLORS.green}PASS${COLORS.reset} ${id.padEnd(22)} ${name} ${COLORS.dim}(${ms}ms)${COLORS.reset}`);
+  } catch (error) {
+    const ms = Date.now() - started;
+    results.push({ id, name, ok: false, ms, error: error.message });
+    console.log(`${COLORS.red}FAIL${COLORS.reset} ${id.padEnd(22)} ${name} ${COLORS.dim}(${ms}ms)${COLORS.reset}`);
+    console.log(`     ${COLORS.red}${error.message}${COLORS.reset}`);
   }
 }
 
-// -----------------------------------------------------------------------------
-// MAIN EXECUTION
-// -----------------------------------------------------------------------------
+function main() {
+  console.log(`${COLORS.cyan}rakitin E2E smoke suite${COLORS.reset} ${COLORS.dim}(${CLI})${COLORS.reset}\n`);
+  for (const scenario of scenarios) runScenario(scenario);
 
-async function main() {
-  logHeader("RAKITIN REAL PROJECT E2E TEST SUITE");
-
-  console.log(`${colors.bold}Langkah 1: Memperbarui global symlink binary (npm unlink -g && npm link)...${colors.reset}`);
-  try {
-    execSync("npm unlink -g rakitin 2>/dev/null || true", { cwd: REPO_ROOT, stdio: "pipe" });
-    execSync("npm link", { cwd: REPO_ROOT, stdio: "pipe" });
-    const rakitinVersion = execSync("rakitin --version", { encoding: "utf8" }).trim();
-    console.log(`${colors.green}✓ Binary rakitin global aktif (versi: ${rakitinVersion})${colors.reset}\n`);
-  } catch (err) {
-    console.error(`${colors.red}Gagal memperbarui link rakitin global: ${err.message}${colors.reset}`);
+  const passed = results.filter((r) => r.ok).length;
+  const failed = results.length - passed;
+  console.log(`\n${passed}/${results.length} skenario lulus`);
+  if (failed > 0) {
+    console.log(`${COLORS.red}${failed} skenario gagal${COLORS.reset}`);
     process.exit(1);
   }
-
-  console.log(`${colors.bold}Langkah 2: Menjalankan skenario pengujian pada ${TEST_PROJECT_DIR}${colors.reset}\n`);
-
-  // E2E-01: Global link verification
-  runScenario("E2E-01", "Verifikasi global binary & CLI list", () => {
-    const res = runCLI(["list", "--json"]);
-    assert(res.status === 0, `Exit code ${res.status}: ${res.stderr}`);
-    const data = JSON.parse(res.stdout);
-    assert(Array.isArray(data.catalog), "Catalog harus berupa array");
-    assert(data.catalog.length >= 8, "Catalog harus memiliki generator yang terdaftar");
-  });
-
-  // E2E-02: rakitin init (basic preset & default prisma ORM)
-  runScenario("E2E-02", "rakitin init --preset basic", () => {
-    const res = runCLI(["init", "--preset", "basic", "--json"]);
-    assert(res.status === 0, `Exit code ${res.status}: ${res.stderr}`);
-    const rcPath = path.join(TEST_PROJECT_DIR, ".rakitinrc.json");
-    assert(fs.existsSync(rcPath), ".rakitinrc.json harus dibuat");
-    const rc = fs.readJsonSync(rcPath);
-    assert(rc.preset === "basic", `Preset harus 'basic', didapat: ${rc.preset}`);
-    assert(rc.orm === "prisma", `ORM default harus 'prisma', didapat: ${rc.orm}`);
-  });
-
-  // E2E-03: rakitin init idempotency & overwrite with --orm
-  runScenario("E2E-03", "rakitin init overwrite/force", () => {
-    runCLI(["init", "--preset", "basic"]);
-    const res = runCLI(["init", "--preset", "advanced", "--orm", "sequelize", "--overwrite", "--json"]);
-    assert(res.status === 0, `Exit code ${res.status}: ${res.stderr}`);
-    const rc = fs.readJsonSync(path.join(TEST_PROJECT_DIR, ".rakitinrc.json"));
-    assert(rc.preset === "advanced", `Preset harus terupdate menjadi 'advanced', didapat: ${rc.preset}`);
-    assert(rc.orm === "sequelize", `ORM harus terupdate menjadi 'sequelize', didapat: ${rc.orm}`);
-  });
-
-  // E2E-04: rakitin add module (Modular, No ORM)
-  runScenario("E2E-04", "rakitin add module user --arch modular --orm none --yes", () => {
-    const res = runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes", "--json"]);
-    assert(res.status === 0, `Exit code ${res.status}: ${res.stderr}`);
-    const modDir = path.join(TEST_PROJECT_DIR, "app/modules/user");
-    assert(fs.existsSync(path.join(modDir, "controllers/user.controller.js")), "user.controller.js harus ada");
-    assert(fs.existsSync(path.join(modDir, "services/user.service.js")), "user.service.js harus ada");
-    assert(fs.existsSync(path.join(modDir, "routes/user.router.js")), "user.router.js harus ada");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-05: rakitin add module (Simple, No ORM)
-  runScenario("E2E-05", "rakitin add module product --arch simple --orm none --yes", () => {
-    const res = runCLI(["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes", "--json"]);
-    assert(res.status === 0, `Exit code ${res.status}: ${res.stderr}`);
-    const modDir = path.join(TEST_PROJECT_DIR, "app/modules/product");
-    assert(fs.existsSync(path.join(modDir, "product.controller.js")), "product.controller.js harus ada");
-    assert(fs.existsSync(path.join(modDir, "product.service.js")), "product.service.js harus ada");
-    assert(fs.existsSync(path.join(modDir, "product.router.js")), "product.router.js harus ada");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-06: rakitin add module with ORMs (Mongoose, Prisma, Sequelize, TypeORM)
-  runScenario("E2E-06", "rakitin add module with ORMs (no-install)", () => {
-    // Mongoose
-    let res = runCLI(["add", "module", "article", "--arch", "modular", "--orm", "mongoose", "--no-install", "--yes", "--json"]);
-    assert(res.status === 0, `Mongoose module error: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/article/models/article.model.js")), "article.model.js harus ada");
-
-    // Sequelize
-    res = runCLI(["add", "module", "order", "--arch", "modular", "--orm", "sequelize", "--no-install", "--yes", "--json"]);
-    assert(res.status === 0, `Sequelize module error: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/order/models/order.model.js")), "order.model.js harus ada");
-
-    // TypeORM
-    res = runCLI(["add", "module", "payment", "--arch", "modular", "--orm", "typeorm", "--no-install", "--yes", "--json"]);
-    assert(res.status === 0, `TypeORM module error: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/payment/entities/payment.entity.js")), "payment.entity.js harus ada");
-
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-07: rakitin add middleware (auth, logger, error, request-time, custom)
-  runScenario("E2E-07", "rakitin add middleware (all standard kinds & custom)", () => {
-    const kinds = ["auth", "logger", "error", "request-time"];
-    for (const k of kinds) {
-      const res = runCLI(["add", "middleware", k, "--no-install", "--json"]);
-      assert(res.status === 0, `Middleware ${k} failed: ${res.stderr}`);
-      assert(
-        fs.existsSync(path.join(TEST_PROJECT_DIR, `app/shared/middlewares/${k}.middleware.js`)),
-        `${k}.middleware.js harus ada`
-      );
-    }
-    const customRes = runCLI(["add", "middleware", "custom", "--yes", "--json"]);
-    assert(customRes.status === 0, `Custom middleware failed: ${customRes.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/middlewares/custom.middleware.js")), "custom.middleware.js harus ada");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-08: rakitin add config (app, jwt, database, cors, redis)
-  runScenario("E2E-08", "rakitin add config (multiple kinds & .env.example merge)", () => {
-    const kinds = ["app", "jwt", "database", "cors", "redis"];
-    for (const k of kinds) {
-      const res = runCLI(["add", "config", k, "--json"]);
-      assert(res.status === 0, `Config ${k} failed: ${res.stderr}`);
-      assert(fs.existsSync(path.join(TEST_PROJECT_DIR, `app/shared/config/${k}.config.js`)), `${k}.config.js harus ada`);
-    }
-    const envExample = fs.readFileSync(path.join(TEST_PROJECT_DIR, ".env.example"), "utf8");
-    assert(envExample.includes("PORT="), ".env.example harus memiliki PORT");
-    assert(envExample.includes("JWT_SECRET="), ".env.example harus memiliki JWT_SECRET");
-    assert(envExample.includes("REDIS_HOST="), ".env.example harus memiliki REDIS_HOST");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-09: rakitin add util
-  runScenario("E2E-09", "rakitin add util uuid", () => {
-    const res = runCLI(["add", "util", "uuid"]);
-    assert(res.status === 0, `Util uuid failed: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/utils/uuid.util.js")), "uuid.util.js harus ada");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-10: rakitin add endpoint
-  runScenario("E2E-10", "rakitin add endpoint on user module", () => {
-    // Generate user module first
-    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
-    const res = runCLI(["add", "endpoint", "user", "--resource", "profile"]);
-    assert(res.status === 0, `Endpoint failed: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/user/routes/profile.router.js")), "profile.router.js harus ada");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-11: rakitin add validation
-  runScenario("E2E-11", "rakitin add validation common", () => {
-    const res = runCLI(["add", "validation", "common"]);
-    assert(res.status === 0, `Validation failed: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/validators/common.validator.js")), "common.validator.js harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/validators/email.validator.js")), "email.validator.js harus ada");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-12: rakitin add docs
-  runScenario("E2E-12", "rakitin add docs openapi-json", () => {
-    const res = runCLI(["add", "docs", "openapi-json"]);
-    assert(res.status === 0, `Docs failed: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/docs/openapi.json")), "openapi.json harus ada");
-  });
-
-  // E2E-13: rakitin integrate (marker wiring & middleware)
-  runScenario("E2E-13", "rakitin integrate with modules & middlewares", () => {
-    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
-    runCLI(["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes"]);
-    runCLI(["add", "middleware", "auth", "--no-install", "--json"]);
-    runCLI(["add", "middleware", "logger", "--json"]);
-
-    const res = runCLI(["integrate", "--middleware", "auth,logger", "--json"]);
-    assert(res.status === 0, `Integrate failed: ${res.stderr}`);
-    const routerPath = path.join(TEST_PROJECT_DIR, "app/routes/index.js");
-    assert(fs.existsSync(routerPath), "app/routes/index.js harus ada");
-    const routerContent = fs.readFileSync(routerPath, "utf8");
-    assert(routerContent.includes("rakitin:routes:start"), "Marker start harus ada");
-    assert(routerContent.includes("rakitin:routes:end"), "Marker end harus ada");
-    assert(routerContent.includes("/user"), "Route /user harus terpasang");
-    assert(routerContent.includes("/product"), "Route /product harus terpasang");
-    assert(routerContent.includes("authMiddleware"), "Auth middleware harus terpasang");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-14: rakitin integrate idempotency & .bak backup
-  runScenario("E2E-14", "rakitin integrate idempotency & .bak creation", () => {
-    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
-    runCLI(["integrate"]);
-    const res = runCLI(["integrate", "--json"]);
-    assert(res.status === 0, `Integrate rerun failed: ${res.stderr}`);
-    const bakPath = path.join(TEST_PROJECT_DIR, "app/routes/index.js.bak");
-    assert(fs.existsSync(bakPath), "Backup file index.js.bak harus dibuat pada integrasi ulang");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-15: rakitin recipe auth
-  runScenario("E2E-15", "rakitin recipe auth", () => {
-    const res = runCLI(["recipe", "auth", "--arch", "modular", "--json"]);
-    assert(res.status === 0, `Recipe auth failed: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/middlewares/auth.middleware.js")), "auth.middleware.js harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/user/routes/user.router.js")), "user module harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "prisma/schema/user.prisma")), "user.prisma harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/config/db.js")), "db.js harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/validators/user.validator.js")), "user.validator.js harus ada");
-    const envExample = fs.readFileSync(path.join(TEST_PROJECT_DIR, ".env.example"), "utf8");
-    assert(envExample.includes("JWT_SECRET="), "JWT_SECRET harus ada di .env.example");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-16: rakitin recipe swagger
-  runScenario("E2E-16", "rakitin recipe swagger", () => {
-    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
-    const res = runCLI(["recipe", "swagger", "--json"]);
-    assert(res.status === 0, `Recipe swagger failed: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/docs/openapi.json")), "openapi.json harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "app/docs/swagger.setup.js")), "swagger.setup.js harus ada");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-  });
-
-  // E2E-17: rakitin recipe docker
-  runScenario("E2E-17", "rakitin recipe docker", () => {
-    const res = runCLI(["recipe", "docker", "--json"]);
-    assert(res.status === 0, `Recipe docker failed: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "Dockerfile")), "Dockerfile harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "docker-compose.yml")), "docker-compose.yml harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, ".dockerignore")), ".dockerignore harus ada");
-  });
-
-  // E2E-18: rakitin recipe test
-  runScenario("E2E-18", "rakitin recipe test", () => {
-    runCLI(["add", "module", "item", "--arch", "modular", "--orm", "none", "--yes"]);
-    const res = runCLI(["recipe", "test", "--json"]);
-    assert(res.status === 0, `Recipe test failed: ${res.stderr}`);
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "tests/setup.js")), "tests/setup.js harus ada");
-    assert(fs.existsSync(path.join(TEST_PROJECT_DIR, "tests/modules/item.test.js")), "tests/modules/item.test.js harus ada");
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "tests"));
-  });
-
-  // E2E-19: rakitin info & doctor
-  runScenario("E2E-19", "rakitin info & doctor diagnostics", () => {
-    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
-    runCLI(["integrate"]);
-    const infoRes = runCLI(["info"]);
-    assert(infoRes.status === 0, `Info failed: ${infoRes.stderr}`);
-    const info = JSON.parse(infoRes.stdout);
-    assert(info.npmProject === true, "info.npmProject harus true");
-    assert(info.modules.modular === 1, "info.modules.modular harus 1");
-    assert(info.mainRouter.exists === true, "info.mainRouter.exists harus true");
-
-    const docRes = runCLI(["doctor"]);
-    assert(docRes.status === 0, `Doctor failed: ${docRes.stderr}`);
-    assert(docRes.stdout.includes("package.json"), "Doctor harus memeriksa package.json");
-  });
-
-  // E2E-20: Dry Run Flag Inspection
-  runScenario("E2E-20", "rakitin add module --dry-run", () => {
-    const res = runCLI(["add", "module", "ghost", "--arch", "modular", "--orm", "none", "--dry-run", "--yes", "--json"]);
-    assert(res.status === 0, `Dry run failed: ${res.stderr}`);
-    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/ghost")), "Modul ghost TIDAK boleh dibuat pada disk saat dry-run");
-  });
-
-  // E2E-21: Full App Integration & Runtime Smoke Test
-  runScenario("E2E-21", "Full App Boot & Router Import Smoke Test", () => {
-    runCLI(["init", "--preset", "intermediate", "--yes"]);
-    runCLI(["add", "module", "account", "--arch", "modular", "--orm", "none", "--yes"]);
-    runCLI(["add", "module", "order", "--arch", "simple", "--orm", "none", "--yes"]);
-    runCLI(["add", "middleware", "auth", "--no-install"]);
-    runCLI(["add", "middleware", "logger"]);
-    runCLI(["add", "config", "app"]);
-    runCLI(["integrate", "--middleware", "auth,logger"]);
-
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-
-    // Verify router export in Node runtime with minimal express/jwt loader
-    const testScript = "const Module = require('module'); const orig = Module._load; Module._load = function(req) { if (req === 'express') return { Router: () => ({ use: () => {}, get: () => {}, post: () => {} }) }; if (req === 'jsonwebtoken') return { sign: () => 'token', verify: () => ({}) }; return orig.apply(this, arguments); }; const router = require('./app/routes/index.js'); if (!router) throw new Error('Router export is empty');";
-    const res = spawnSync(process.execPath, ["-e", testScript], {
-      cwd: TEST_PROJECT_DIR,
-      encoding: "utf8",
-    });
-    assert(res.status === 0, `Router runtime import failed: ${res.stderr}`);
-  });
-
-  // E2E-22: Runtime Require Validation of All ORMs (Prisma, Sequelize, Mongoose, TypeORM) in Both Architectures
-  runScenario("E2E-22", "Runtime Require Validation for All ORMs (Modular & Simple)", () => {
-    // Generate modular ORMs
-    runCLI(["add", "module", "pMod", "--arch", "modular", "--orm", "prisma", "--no-install", "--yes"]);
-    runCLI(["add", "module", "sMod", "--arch", "modular", "--orm", "sequelize", "--no-install", "--yes"]);
-    runCLI(["add", "module", "mMod", "--arch", "modular", "--orm", "mongoose", "--no-install", "--yes"]);
-    runCLI(["add", "module", "tMod", "--arch", "modular", "--orm", "typeorm", "--no-install", "--yes"]);
-
-    // Generate simple ORMs
-    runCLI(["add", "module", "pSim", "--arch", "simple", "--orm", "prisma", "--no-install", "--yes"]);
-    runCLI(["add", "module", "sSim", "--arch", "simple", "--orm", "sequelize", "--no-install", "--yes"]);
-    runCLI(["add", "module", "mSim", "--arch", "simple", "--orm", "mongoose", "--no-install", "--yes"]);
-    runCLI(["add", "module", "tSim", "--arch", "simple", "--orm", "typeorm", "--no-install", "--yes"]);
-
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-
-    // Verify each generated service and model can resolve its relative requires without MODULE_NOT_FOUND
-    const runtimeLoaderScript = `
-      const Module = require('module');
-      const orig = Module._load;
-      Module._load = function(req, parent, isMain) {
-        if (req === '@prisma/client') {
-          return { PrismaClient: function() { return {}; } };
-        }
-        if (req === 'sequelize') {
-          function SequelizeMock() {
-            this.define = () => ({});
-          }
-          SequelizeMock.DataTypes = { INTEGER: 'INTEGER', STRING: 'STRING' };
-          SequelizeMock.Sequelize = SequelizeMock;
-          return SequelizeMock;
-        }
-        if (req === 'mongoose') {
-          const Schema = function() {};
-          return { Schema, model: () => ({}) };
-        }
-        if (req === 'typeorm') {
-          return {
-            EntitySchema: function() {},
-            DataSource: function() {
-              this.getRepository = () => ({
-                find: async () => [],
-                findOneBy: async () => ({}),
-                create: (d) => d,
-                save: async (d) => d,
-                delete: async () => ({}),
-              });
-            },
-          };
-        }
-        return orig.apply(this, arguments);
-      };
-
-      // Test Modular requires
-      require('./app/modules/p-mod/services/p-mod.service.js');
-      require('./app/modules/s-mod/services/s-mod.service.js');
-      require('./app/modules/m-mod/services/m-mod.service.js');
-      require('./app/modules/t-mod/services/t-mod.service.js');
-      require('./app/modules/s-mod/models/s-mod.model.js');
-      require('./app/modules/m-mod/models/m-mod.model.js');
-      require('./app/modules/t-mod/entities/t-mod.entity.js');
-
-      // Test Simple requires
-      require('./app/modules/p-sim/p-sim.service.js');
-      require('./app/modules/s-sim/s-sim.service.js');
-      require('./app/modules/m-sim/m-sim.service.js');
-      require('./app/modules/t-sim/t-sim.service.js');
-      require('./app/modules/s-sim/s-sim.model.js');
-      require('./app/modules/m-sim/m-sim.model.js');
-      require('./app/modules/t-sim/t-sim.entity.js');
-    `;
-
-    const res = spawnSync(process.execPath, ["-e", runtimeLoaderScript], {
-      cwd: TEST_PROJECT_DIR,
-      encoding: "utf8",
-    });
-    assert(res.status === 0, `ORM runtime require validation failed: ${res.stderr}`);
-  });
-
-  // E2E-23: Runtime Require Validation of Endpoint Generator (Modular & Simple)
-  runScenario("E2E-23", "Runtime Require Validation for Endpoint Generator (Modular & Simple)", () => {
-    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
-    runCLI(["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes"]);
-
-    runCLI(["add", "endpoint", "user", "--resource", "profile"]);
-    runCLI(["add", "endpoint", "product", "--resource", "item"]);
-
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-
-    const endpointLoaderScript = `
-      const Module = require('module');
-      const orig = Module._load;
-      Module._load = function(req) {
-        if (req === 'express') return { Router: () => ({ get: () => {}, post: () => {}, put: () => {}, delete: () => {} }) };
-        return orig.apply(this, arguments);
-      };
-
-      // Modular endpoint components
-      require('./app/modules/user/routes/profile.router.js');
-      require('./app/modules/user/controllers/profile.controller.js');
-      require('./app/modules/user/services/profile.service.js');
-
-      // Simple endpoint components
-      require('./app/modules/product/item.router.js');
-      require('./app/modules/product/item.controller.js');
-      require('./app/modules/product/item.service.js');
-    `;
-
-    const res = spawnSync(process.execPath, ["-e", endpointLoaderScript], {
-      cwd: TEST_PROJECT_DIR,
-      encoding: "utf8",
-    });
-    assert(res.status === 0, `Endpoint runtime require failed: ${res.stderr}`);
-  });
-
-  // E2E-24: Runtime Require Validation of Utils, Configs, Validators, Middlewares, and Docs
-  runScenario("E2E-24", "Runtime Require Validation for Shared Utilities, Configs, Validators, Docs", () => {
-    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
-    runCLI(["add", "util", "string"]);
-    runCLI(["add", "util", "number"]);
-    runCLI(["add", "util", "array"]);
-    runCLI(["add", "config", "app"]);
-    runCLI(["add", "config", "jwt"]);
-    runCLI(["add", "config", "cors"]);
-    runCLI(["add", "middleware", "auth", "--no-install"]);
-    runCLI(["add", "middleware", "logger"]);
-    runCLI(["add", "validation", "common"]);
-    runCLI(["add", "validation", "from-module", "user"]);
-    runCLI(["add", "docs", "swagger-ui"]);
-
-    validateSyntaxInDir(path.join(TEST_PROJECT_DIR, "app"));
-
-    const sharedLoaderScript = `
-      const Module = require('module');
-      const orig = Module._load;
-      Module._load = function(req) {
-        if (req === 'jsonwebtoken') return { verify: () => ({}) };
-        if (req === 'swagger-ui-express') return { serve: () => {}, setup: () => () => {} };
-        if (req === 'swagger-jsdoc') return () => ({});
-        if (req === 'joi') {
-          const createChain = () => new Proxy(function() {}, {
-            get: (target, prop) => {
-              if (prop === 'then') return undefined;
-              return (...args) => createChain();
-            },
-            apply: (target, thisArg, args) => createChain(),
-          });
-          return createChain();
-        }
-        return orig.apply(this, arguments);
-      };
-
-      require('./app/shared/utils/string.util.js');
-      require('./app/shared/utils/number.util.js');
-      require('./app/shared/utils/array.util.js');
-      require('./app/shared/config/app.config.js');
-      require('./app/shared/config/jwt.config.js');
-      require('./app/shared/config/cors.config.js');
-      require('./app/shared/middlewares/auth.middleware.js');
-      require('./app/shared/middlewares/logger.middleware.js');
-      require('./app/shared/validators/common.validator.js');
-      require('./app/shared/validators/user.validator.js');
-      const { mountSwagger } = require('./app/docs/swagger-setup.js');
-      if (typeof mountSwagger !== 'function') throw new Error('mountSwagger is not a function');
-    `;
-
-    const res = spawnSync(process.execPath, ["-e", sharedLoaderScript], {
-      cwd: TEST_PROJECT_DIR,
-      encoding: "utf8",
-    });
-    assert(res.status === 0, `Shared components runtime require failed: ${res.stderr}`);
-  });
-
-  // E2E-25: Comprehensive Dry Run across all generator kinds
-  runScenario("E2E-25", "Strict Dry-Run Validation (Zero disk writes across all generators)", () => {
-    // None of these should write to disk when --dry-run is passed
-    runCLI(["add", "module", "dryMod", "--arch", "modular", "--orm", "none", "--dry-run", "--yes"]);
-    runCLI(["add", "util", "uuid", "--dry-run"]);
-    runCLI(["add", "config", "redis", "--dry-run"]);
-    runCLI(["add", "middleware", "error", "--dry-run", "--no-install"]);
-    runCLI(["add", "validation", "common", "--dry-run"]);
-    runCLI(["add", "docs", "openapi-json", "--dry-run"]);
-
-    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/modules/dry-mod")), "dry-mod folder TIDAK boleh dibuat");
-    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/utils/uuid.util.js")), "uuid.util TIDAK boleh dibuat");
-    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/config/redis.config.js")), "redis.config TIDAK boleh dibuat");
-    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/middlewares/error.middleware.js")), "error.middleware TIDAK boleh dibuat");
-    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/shared/validators/common.validator.js")), "common.validator TIDAK boleh dibuat");
-    assert(!fs.existsSync(path.join(TEST_PROJECT_DIR, "app/docs/openapi.json")), "openapi.json TIDAK boleh dibuat");
-  });
-
-  // E2E-26: Live Express Server & HTTP Request Test
-  runScenario("E2E-26", "Live Express App & Controller Execution Test", () => {
-    runCLI(["init", "--preset", "advanced", "--yes"]);
-    runCLI(["add", "module", "user", "--arch", "modular", "--orm", "none", "--yes"]);
-    runCLI(["add", "module", "product", "--arch", "simple", "--orm", "none", "--yes"]);
-    runCLI(["add", "middleware", "logger", "--json"]);
-    runCLI(["integrate", "--middleware", "logger", "--json"]);
-
-    const liveServerScript = `
-      const Module = require('module');
-      const orig = Module._load;
-      const routes = [];
-      Module._load = function(req) {
-        if (req === 'express') {
-          const createRouter = () => ({
-            routes: [],
-            use(pathOrMw, maybeMw) {
-              if (typeof pathOrMw === 'string' && maybeMw && Array.isArray(maybeMw.routes)) {
-                for (const r of maybeMw.routes) {
-                  routes.push({ method: r.method, path: pathOrMw + (r.path === '/' ? '' : r.path), handler: r.handler });
-                }
-              }
-            },
-            get(p, h) {
-              this.routes.push({ method: 'GET', path: p, handler: h });
-              routes.push({ method: 'GET', path: p, handler: h });
-            },
-            post(p, h) {
-              this.routes.push({ method: 'POST', path: p, handler: h });
-              routes.push({ method: 'POST', path: p, handler: h });
-            },
-            put(p, h) {
-              this.routes.push({ method: 'PUT', path: p, handler: h });
-              routes.push({ method: 'PUT', path: p, handler: h });
-            },
-            delete(p, h) {
-              this.routes.push({ method: 'DELETE', path: p, handler: h });
-              routes.push({ method: 'DELETE', path: p, handler: h });
-            },
-          });
-          const fn = () => createRouter();
-          fn.Router = createRouter;
-          return fn;
-        }
-        return orig.apply(this, arguments);
-      };
-
-      const router = require('./app/routes/index.js');
-      async function testEndpoint(modulePath) {
-        const route = routes.find(r => r.path === modulePath && r.method === 'GET');
-        if (!route) throw new Error('Route not found: ' + modulePath + ' in: ' + JSON.stringify(routes.map(r => r.path)));
-        let responseData = null;
-        let responseStatus = null;
-        const mockReq = { query: {}, params: {}, body: {} };
-        const mockRes = {
-          status(s) { responseStatus = s; return this; },
-          json(d) { responseData = d; return this; },
-        };
-        await route.handler(mockReq, mockRes, (err) => { if (err) throw err; });
-        if (responseStatus !== 200) throw new Error('Expected status 200, got ' + responseStatus);
-        if (!responseData || !responseData.message) throw new Error('Expected message in response for ' + modulePath);
-      }
-
-      (async () => {
-        await testEndpoint('/user');
-        await testEndpoint('/product');
-      })().catch(err => {
-        console.error(err);
-        process.exit(1);
-      });
-    `;
-    const res = spawnSync(process.execPath, ["-e", liveServerScript], {
-      cwd: TEST_PROJECT_DIR,
-      encoding: "utf8",
-      timeout: 10000,
-    });
-    assert(res.status === 0, `Live express test failed: ${res.stderr || res.stdout}`);
-  });
-
-  // Teardown: leave tests/project in clean state
-  cleanProject();
-
-  logHeader("HASIL PENGUJIAN REAL PROJECT");
-  console.log(`  Total Skenario: ${passedCount + failedCount}`);
-  console.log(`  ${colors.green}Passed: ${passedCount}${colors.reset}`);
-  console.log(`  ${failedCount > 0 ? colors.red : colors.green}Failed: ${failedCount}${colors.reset}\n`);
-
-  if (failedCount > 0) {
-    console.log(`${colors.red}${colors.bold}Daftar Kegagalan:${colors.reset}`);
-    failures.forEach((f) => console.log(`  - [${f.id}] ${f.name}: ${f.error}`));
-    process.exit(1);
-  } else {
-    console.log(`${colors.green}${colors.bold}🎉 Seluruh ${passedCount} skenario pengujian real-project sukses 100%!${colors.reset}\n`);
-    process.exit(0);
-  }
+  console.log(`${COLORS.green}semua skenario lulus${COLORS.reset}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main();

@@ -11,18 +11,22 @@ Semantic Versioning:
 - **MINOR** — backward-compatible features.
 - **PATCH** — backward-compatible bug fixes.
 
-Runtime support: Node.js **>=18** (inquirer v12 baseline). Pre-releases use
-`vX.Y.Z-rc.N` (never published under the stable tag flow).
+Runtime support: Node.js **`^22.13.0 || >=23.5.0`** (the intersection of
+`inquirer@14` and `yargs@18` engine ranges). The package is **CJS-only** — there
+is no `dist/` build and no `build` script. Pre-releases use `vX.Y.Z-rc.N`
+(never published under the stable tag flow).
 
 ## Pre-conditions
 
 1. `development` is green: `npm run lint`, `npm run typecheck`, `npm test`,
-   `npm run build`.
+   and the tree is clean (`git status --porcelain` empty — `npm test` must not
+   mutate `package.json`/`package-lock.json`).
 2. `CHANGELOG.md` has a completed `[Unreleased]` section moved to the new
    version entry.
 3. `package.json` version bumped by the releasing maintainer.
-4. `npm pack --dry-run` inspected — confirm `rakitin.schema.json` and
-   `dist/` artifacts are present.
+4. `npm pack --dry-run` inspected — the tarball must contain `lib/**`
+   (including `lib/templates/**`), `bin`, `types`, `rakitin.schema.json`,
+   `docs`, `README.md`, `CHANGELOG.md`, `LICENSE`.
 
 ## Automated flow (GitHub Actions)
 
@@ -31,10 +35,17 @@ tag `v*` is pushed to `main`:
 
 1. Requires the **`NPM_TOKEN`** repository secret (npm access token with
    `publish` scope). Without it, the publish step fails safely.
-2. Build + typecheck run again as publish gates.
+2. Typecheck runs again as a publish gate (`prepublishOnly` → `npm run
+   typecheck`).
 3. `npm publish --provenance` (requires OIDC; enabled by default on GitHub
    for public repos).
 4. A GitHub Release is created from the tag with auto-generated notes.
+
+> **Workflow drift to fix:** `.github/workflows/release.yml` still runs
+> `npm run build && npm run typecheck`, and it pins Node 20.x — both are stale
+> for v3 (no `build` script; the engine floor is `^22.13.0 || >=23.5.0`).
+> The workflow must drop the build step and move to Node 22.x before the next
+> tag. `npm-publish.yml` has the same Node 20 pin.
 
 ### Steps (automated)
 
@@ -57,8 +68,8 @@ If the workflow is not configured (no `NPM_TOKEN`), publish from a machine
 with npm auth:
 
 ```bash
-npm publish                       # runs build + typecheck via prepublishOnly
-gh release create v2.0.0 --generate-notes --title "rakitin v2.0.0"
+npm publish                       # runs typecheck via prepublishOnly
+gh release create v3.0.0 --generate-notes --title "rakitin v3.0.0"
 ```
 
 ## PR-based merge (feature → main)

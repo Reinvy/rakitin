@@ -1,6 +1,16 @@
 # Migrating rakitin 1.x → 2.x
 
-rakitin **2.0.0** replaces the fully interactive v1 UX with a headless-first,
+> **Historical document.** This guide describes the **v1 → v2** migration.
+> Several v2 surfaces it mentions — the bare interactive menu, `rakitin router`,
+> the interactive module/router flows, `lib/generator/shared/error-handler.js`,
+> `path-resolver.js`, `file-validator.js`, the hand-rolled template-engine
+> exports and the `dist/` build — were **removed in v3**. For the current
+> upgrade path read [migration-v2-to-v3.md](./migration-v2-to-v3.md) first, and
+> treat every `require("rakitin/lib/…")` example below as replaced by the
+> documented `exports` subpaths (`rakitin`, `rakitin/naming`, `rakitin/safety`,
+> …).
+
+rakitin **2.0.0** replaced the fully interactive v1 UX with a headless-first,
 integration-hardened CLI while deliberately keeping the old entry points
 alive. This guide lists every breaking change, why it exists, and the exact
 code/CI edits needed. Long-term support policy lives in
@@ -48,8 +58,11 @@ custom code between markers was never supported anyway).
 
 ### 1.3 Node.js engine floor raised to >= 18
 
-`engines.node` is now `>=18.0.0`. The CLI aborts or warns under older runtimes
+`engines.node` became `>=18.0.0`. The CLI aborts or warns under older runtimes
 depending on package-manager enforcement. Align CI images (Node 18+).
+
+> v3 raised the floor again to `^22.13.0 || >=23.5.0` (see
+> [migration-v2-to-v3.md §1](./migration-v2-to-v3.md#1-runtime-baseline)).
 
 ### 1.4 Real EJS template engine; new export shape of `lib/template/engine`
 
@@ -114,6 +127,12 @@ These symbols existed in v1 but were dead weight; they no longer resolve:
 
 Consumers should migrate to public APIs (§3, step 4).
 
+> **v3:** `lib/generator/router/router.js` was deleted entirely, together with
+> `integrateRouter`, `createAutoRouterTemplate`, `createAutoRouter`,
+> `integrateAutoRouter` and `GLOBAL_MIDDLEWARE_CHOICES`. Router wiring now lives
+> in `lib/generator/router/wiring.js` + `safety.buildRoutesContent`; see
+> [migration-v2-to-v3.md §3](./migration-v2-to-v3.md#3-generated-router-wiring-breaking).
+
 ### 1.7 Generator return shapes (summaries)
 
 Non-interactive cores now return structured summaries for the command layer:
@@ -141,6 +160,13 @@ Previously Prisma model boilerplate landed silently in `prisma/models/*.prisma`
    import — is created for you.
 
 Re-run generators after a late `npx prisma init` to backfill the schema.
+
+> **v3 changed this again:** models are written to
+> `prisma/schema/<kebab>.prisma` (multi-file schema) with `prisma.config.js` as
+> the single pointer, the `package.json#prisma.schema` write and the
+> `npx prisma init` invocation are gone, and `DATABASE_URL` is merged into
+> `.env.example` on every path. See
+> [migration-v2-to-v3.md §8](./migration-v2-to-v3.md#8-prisma-flow-breaking).
 
 ### 1.9 Syntax validation no longer executes your files
 
@@ -254,14 +280,16 @@ const { handleAutoRouterIntegration } = require("rakitin/lib/generator/router/ro
 const { magicHelper } = require("rakitin/lib/generator/shared/integration-helper");
 await handleAutoRouterIntegration({ autoDetect: true });
 
-// AFTER — stable v2 layer
-const { integrateCommand } = require("rakitin/lib/commands/integrate");
-const { recipeCommand, RECIPES } = require("rakitin/lib/commands/recipe");
-const { addCommand } = require("rakitin/lib/commands/add");
-const safety = require("rakitin/lib/safety"); // buildRoutesContent / markers
+// AFTER — stable public layer (v3 exports map: no `rakitin/lib/...` subpaths)
+const { commands } = require("rakitin");        // { integrateCommand, recipeCommand, addCommand, … }
+const safety = require("rakitin/safety");       // buildRoutesContent / markers / plan API
 
-await integrateCommand({ middleware: ["auth", "logger"] });
+await commands.integrateCommand({ middleware: ["auth", "logger"] });
 ```
+
+(`RECIPES` is internal to `lib/commands/recipe.js`; `rakitin list` is the
+supported way to enumerate recipes. Deep `rakitin/lib/...` imports are blocked
+by the `exports` map.)
 
 Library callers wanting programmatic plans can drive
 `safety.beginPlan()` / `safety.getPlan()` around any command call, then
@@ -282,9 +310,9 @@ Library callers wanting programmatic plans can drive
 | Phase | Surface state | Guidance |
 | --- | --- | --- |
 | v1.x (historical) | Full interactive menu only | Freeze new work; plan migration |
-| **2.0.0 (current)** | Verb-style primary · bare menu + `rakitin router` retained untouched | All new scripts/targets should use verbs + `--json` |
-| All 2.x minors | Legacy entries continue working; bug-fix level support only | Start removing menu scripting internally |
-| Earliest 3.0.0 | Legacy menu and `router` alias candidates for deletion | Nothing scripted against verbs should notice |
+| **2.0.0 (historical)** | Verb-style primary · bare menu + `rakitin router` retained untouched | All new scripts/targets should use verbs + `--json` |
+| All 2.x minors | Legacy entries continued working; bug-fix level support only | Start removing menu scripting internally |
+| **3.0.0 (current)** | Legacy menu, `rakitin router` and the interactive module/router flows **removed**; CJS-only; Node `^22.13.0 \|\| >=23.5.0` | Migrate with [migration-v2-to-v3.md](./migration-v2-to-v3.md) |
 
 Concrete scheduling follows SemVer discipline and the maintenance policy in
 [`strategi-rilis-dan-maintenance.md`](../strategi-rilis-dan-maintenance.md).

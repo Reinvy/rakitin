@@ -1,108 +1,178 @@
 /**
- * Tests for lib/commands/config.js (`rakitin config`)
+ * Tests for lib/commands/config.js (`rakitin config`) - v3 contract.
+ * Every write lands in `global.tempDir` (the suite never touches the repo).
  */
-const fs = require("fs-extra");
+const fs = require("fs");
 const path = require("path");
 const { configCommand } = require("../../lib/commands/config");
+const safety = require("../../lib/safety");
+
+const SCHEMA_URL =
+  "https://raw.githubusercontent.com/Reinvy/rakitin/main/rakitin.schema.json";
+
+const argv = (action, key, value) => ({ action, key, value, _: ["config"] });
+const context = (extra = {}) => ({ root: global.tempDir, json: true, dryRun: false, ...extra });
+
+const rcPath = () => path.join(global.tempDir, ".rakitinrc.json");
+const readRc = () => JSON.parse(fs.readFileSync(rcPath(), "utf8"));
 
 beforeEach(() => {
-  jest.spyOn(console, "log").mockImplementation(() => {});
+  fs.writeFileSync(
+    path.join(global.tempDir, "package.json"),
+    JSON.stringify({ name: "config-demo", version: "1.0.0" }, null, 2) + "\n"
+  );
+  safety.resetPlan();
 });
 
 afterEach(() => {
-  jest.restoreAllMocks();
+  safety.resetPlan();
 });
 
-describe("configCommand", () => {
-  beforeEach(() => {
-    fs.outputJsonSync(path.join(global.tempDir, ".rakitinrc.json"), {
-      preset: "basic",
-      orm: "prisma",
-      defaultArchitecture: "modular",
-      autoIntegrateRouter: true,
-      packageManager: "npm",
-      version: 2,
-    });
+describe("config list", () => {
+  test("reports the resolved config plus a project summary", async () => {
+    fs.writeFileSync(rcPath(), JSON.stringify({ $schema: SCHEMA_URL, version: 3, orm: "prisma" }));
+
+    const result = await configCommand(argv("list"), context());
+
+    expect(result.ok).toBe(true);
+    expect(result.created).toEqual([]);
+    expect(result.data.config.orm).toBe("prisma");
+    expect(result.data.config.version).toBe(3);
+    expect(result.data.project.packageName).toBe("config-demo");
+    expect(result.message).toBeUndefined(); // JSON mode keeps stdout to one object
   });
 
-  test("list returns active configuration", async () => {
-    const res = await configCommand("list", null, null, { cwd: global.tempDir });
-    expect(res.ok).toBe(true);
-    expect(res.config.orm).toBe("prisma");
-    expect(res.config.defaultArchitecture).toBe("modular");
+  test("renders a human table outside JSON mode", async () => {
+    const result = await configCommand(argv("list"), context({ json: false }));
+
+    expect(result.message).toContain("orm");
+    expect(result.message).toContain("(belum diset)");
+  });
+});
+
+describe("config get", () => {
+  test("returns the resolved value of a known key", async () => {
+    fs.writeFileSync(rcPath(), JSON.stringify({ version: 3, orm: "mongoose" }));
+
+    const result = await configCommand(argv("get", "orm"), context());
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({ key: "orm", value: "mongoose" });
   });
 
-  test("get returns specific config value", async () => {
-    const res = await configCommand("get", "orm", null, { cwd: global.tempDir });
-    expect(res.ok).toBe(true);
-    expect(res.key).toBe("orm");
-    expect(res.value).toBe("prisma");
+  test("falls back to process positionals", async () => {
+    fs.writeFileSync(rcPath(), JSON.stringify({ version: 3, orm: "typeorm" }));
+
+    const result = await configCommand({ _: ["config", "get", "orm"] }, context());
+
+    expect(result.data.value).toBe("typeorm");
   });
 
-  test("get handles alias keys (e.g. arch -> defaultArchitecture)", async () => {
-    const res = await configCommand("get", "arch", null, { cwd: global.tempDir });
-    expect(res.ok).toBe(true);
-    expect(res.key).toBe("defaultArchitecture");
-    expect(res.value).toBe("modular");
-  });
-
-  test("get returns error for unknown key in json mode", async () => {
-    const res = await configCommand("get", "nonExistentKey", null, { cwd: global.tempDir, json: true });
-    expect(res.ok).toBe(false);
-    expect(res.value).toBeUndefined();
-  });
-
-  test("set updates ORM in .rakitinrc.json", async () => {
-    const res = await configCommand("set", "orm", "mongoose", { cwd: global.tempDir });
-    expect(res.ok).toBe(true);
-    expect(res.value).toBe("mongoose");
-
-    const cfg = fs.readJsonSync(path.join(global.tempDir, ".rakitinrc.json"));
-    expect(cfg.orm).toBe("mongoose");
-  });
-
-  test("set updates defaultArchitecture in .rakitinrc.json", async () => {
-    const res = await configCommand("set", "arch", "simple", { cwd: global.tempDir });
-    expect(res.ok).toBe(true);
-    expect(res.value).toBe("simple");
-
-    const cfg = fs.readJsonSync(path.join(global.tempDir, ".rakitinrc.json"));
-    expect(cfg.defaultArchitecture).toBe("simple");
-  });
-
-  test("set updates autoIntegrateRouter boolean value", async () => {
-    const res = await configCommand("set", "autoIntegrate", "false", { cwd: global.tempDir });
-    expect(res.ok).toBe(true);
-    expect(res.value).toBe(false);
-
-    const cfg = fs.readJsonSync(path.join(global.tempDir, ".rakitinrc.json"));
-    expect(cfg.autoIntegrateRouter).toBe(false);
-  });
-
-  test("set updates packageManager", async () => {
-    const res = await configCommand("set", "pm", "pnpm", { cwd: global.tempDir });
-    expect(res.ok).toBe(true);
-    expect(res.value).toBe("pnpm");
-
-    const cfg = fs.readJsonSync(path.join(global.tempDir, ".rakitinrc.json"));
-    expect(cfg.packageManager).toBe("pnpm");
-  });
-
-  test("set rejects invalid ORM", async () => {
-    await expect(configCommand("set", "orm", "invalid-orm", { cwd: global.tempDir })).rejects.toThrow(
-      /ORM tidak valid/
+  test("rejects unknown keys", async () => {
+    await expect(configCommand(argv("get", "nope"), context())).rejects.toThrow(
+      /Kunci config tidak dikenal: "nope"\. Pilihan: version, preset, arch, orm, packageManager/
     );
   });
 
-  test("set rejects invalid architecture", async () => {
-    await expect(configCommand("set", "arch", "invalid-arch", { cwd: global.tempDir })).rejects.toThrow(
-      /Arsitektur tidak valid/
+  test("rejects known-but-unset keys", async () => {
+    await expect(configCommand(argv("get", "preset"), context())).rejects.toThrow(
+      /belum diset/
     );
   });
+});
 
-  test("set rejects invalid package manager", async () => {
-    await expect(configCommand("set", "pm", "invalid-pm", { cwd: global.tempDir })).rejects.toThrow(
-      /Package manager tidak valid/
+describe("config set", () => {
+  test("creates .rakitinrc.json seeded with $schema and version 3", async () => {
+    const result = await configCommand(argv("set", "orm", "prisma"), context());
+
+    expect(result.ok).toBe(true);
+    expect(result.created).toEqual([".rakitinrc.json"]);
+    expect(result.skipped).toEqual([]);
+    expect(readRc()).toEqual({ $schema: SCHEMA_URL, version: 3, orm: "prisma" });
+  });
+
+  test("updates the existing file and preserves unrelated keys", async () => {
+    fs.writeFileSync(
+      rcPath(),
+      JSON.stringify({ $schema: SCHEMA_URL, version: 3, orm: "prisma", defaultArchitecture: "simple" })
+    );
+
+    const result = await configCommand(argv("set", "orm", "sequelize"), context());
+
+    expect(result.created).toEqual([".rakitinrc.json"]);
+    expect(readRc().orm).toBe("sequelize");
+    expect(readRc().defaultArchitecture).toBe("simple");
+  });
+
+  test("reports an unchanged file in skipped (no backup)", async () => {
+    fs.writeFileSync(rcPath(), JSON.stringify({ $schema: SCHEMA_URL, version: 3, orm: "prisma" }));
+
+    const result = await configCommand(argv("set", "orm", "prisma"), context());
+
+    expect(result.created).toEqual([]);
+    expect(result.skipped).toEqual([".rakitinrc.json"]);
+    expect(fs.existsSync(`${rcPath()}.bak`)).toBe(false);
+  });
+
+  test("writes a backup when overwriting", async () => {
+    fs.writeFileSync(rcPath(), JSON.stringify({ $schema: SCHEMA_URL, version: 3, orm: "prisma" }));
+
+    await configCommand(argv("set", "orm", "mongoose"), context());
+
+    expect(JSON.parse(fs.readFileSync(`${rcPath()}.bak`, "utf8")).orm).toBe("prisma");
+  });
+
+  test("is a no-op under --dry-run", async () => {
+    safety.beginPlan();
+    const result = await configCommand(argv("set", "orm", "prisma"), context({ dryRun: true }));
+
+    expect(fs.existsSync(rcPath())).toBe(false);
+    expect(result.plan).toEqual([
+      { op: "create", path: rcPath() },
+    ]);
+    expect(result.created).toEqual([".rakitinrc.json"]);
+  });
+
+  test("coerces booleans and plugin lists", async () => {
+    await configCommand(argv("set", "generateTestFiles", "true"), context());
+    await configCommand(argv("set", "plugins", '["rakitin-plugin-a","./plugins/x.js"]'), context());
+    await configCommand(argv("set", "preset", "Advanced"), context());
+
+    const rc = readRc();
+    expect(rc.generateTestFiles).toBe(true);
+    expect(rc.plugins).toEqual(["rakitin-plugin-a", "./plugins/x.js"]);
+    expect(rc.preset).toBe("advanced");
+  });
+
+  test("accepts a comma separated plugin list", async () => {
+    await configCommand(argv("set", "plugins", "a,b"), context());
+    expect(readRc().plugins).toEqual(["a", "b"]);
+  });
+
+  test.each([
+    ["nope", "1", /Kunci config tidak dikenal: "nope"/],
+    ["version", "2", /Nilai version harus 3/],
+    ["preset", "extreme", /Nilai preset tidak valid/],
+    ["arch", "monolith", /Nilai arch tidak valid/],
+    ["orm", "knex", /Nilai orm tidak valid/],
+    ["packageManager", "cargo", /Nilai packageManager tidak valid/],
+    ["autoIntegrateRouter", "maybe", /harus boolean/],
+    ["plugins", "[1,2]", /array string/],
+  ])("rejects %s=%s", async (key, value, pattern) => {
+    await expect(configCommand(argv("set", key, value), context())).rejects.toThrow(pattern);
+  });
+
+  test("requires key and value", async () => {
+    await expect(configCommand(argv("set", "orm"), context())).rejects.toThrow(
+      /Penggunaan: rakitin config set <key> <value>/
+    );
+  });
+});
+
+describe("config <unknown action>", () => {
+  test("rejects unknown actions", async () => {
+    await expect(configCommand(argv("wobble"), context())).rejects.toThrow(
+      /Aksi config tidak dikenal: "wobble"\. Pilihan: list, get, set\./
     );
   });
 });

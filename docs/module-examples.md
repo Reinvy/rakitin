@@ -1,32 +1,38 @@
-# Module Examples — real v2 output
+# Module Examples — real v3 output
 
-Everything in this document reflects **rakitin v2.0.0** templates as they
-are emitted today (`lib/generator/module/arch/simple.arch.js`,
-`lib/generator/module/arch/modular.arch.js`,
-`lib/generator/shared/orm-service-generator.js`, case `None`). Statements
-made against older blog posts / v1 documentation are flagged under each
-section and link to the [migration guide](./migration-v1-to-v2.md).
+Everything in this document is the **actual v3 output** of the module
+generator (`lib/generator/module/arch/{simple,modular}.arch.js`,
+`lib/generator/module/verbs.js`, `lib/generator/module/orm/none.orm.js` and
+the templates under `lib/templates/module/`). File bodies are verbatim modulo
+trivial leading/trailing whitespace normalized for readability.
 
-Scope guard: examples use module name **`user-profile`** with **ORM =
-None** only — the zero-dependency baseline guaranteed by the basic tier.
-File bodies are the template outputs verbatim modulo trivial leading /
-trailing whitespace normalized for doc readability.
+Scope guard: examples use the module name **`user-profile`** (modular) and
+**`payment`** (simple) with **ORM = None** — the zero-dependency baseline.
+For the ORM-specific files see [integration-tiers.md](./integration-tiers.md)
+and [architecture.md](./architecture.md#4-command--generator-layering).
 
 ---
 
 ## 1. Generating the sample
 
 ```bash
-rakitin add module user-profile --arch modular --orm none   # modular tree
-# or
-rakitin add module user-profile --arch simple --orm none    # flat trio
+rakitin add module user-profile --arch modular --orm none --yes
+rakitin add module payment      --arch simple  --orm none --yes
 ```
 
-Naming convention recap (single source: `lib/naming.js`):
+Naming recap (single source: `lib/naming.js`):
 
-| Input | Directory / files | Identifier | Header comments |
+| Input | Directory / files | Identifiers | Store constant |
 | --- | --- | --- | --- |
-| `user-profile` | `app/modules/user-profile/…` | `userProfile…` | kept as typed |
+| `user-profile` | `app/modules/user-profile/…` | `userProfile…` | `USER_PROFILE_STORE` |
+| `UserProfile` | `app/modules/user-profile/…` | `userProfile…` | `USER_PROFILE_STORE` |
+
+Names are validated by `assertSafeName("module", …)`: path separators,
+`..`/leading dots and control characters are rejected with
+`Nama module tidak valid: …`, and everything accepted is normalized to
+kebab-case.
+
+---
 
 ## 2. Modular tree (`--arch modular`)
 
@@ -42,20 +48,20 @@ app/modules/user-profile/
     └── user-profile.router.js
 ```
 
-Older blog versions showed flat files (`user.controller.js`) for this
-layout or `routes/user.routes.js` filenames — both inaccurate for v2: the
-detector keys on exactly these subfolder paths
-(`controllers/` ⇒ modular, `<name>.controller.js` ⇒ simple).
+The detector keys on exactly these paths (`routes/<kebab>.router.js` ⇒
+modular, flat `<kebab>.controller.js` ⇒ simple).
 
 ### 2.1 `controllers/user-profile.controller.js`
 
+Exports the **full verb set**, each delegating to the service:
+
 ```javascript
 // user-profile Controller
-const { getAll } = require("../services/user-profile.service");
+const service = require("../services/user-profile.service");
 
 exports.getAll = async (req, res, next) => {
   try {
-    const data = await getAll(req);
+    const data = await service.getAll(req);
     res.status(200).json({
       message: "Berhasil mendapatkan data",
       data,
@@ -64,254 +70,306 @@ exports.getAll = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.getById = async (req, res, next) => {
+  try {
+    const data = await service.getById(req);
+    res.status(200).json({
+      message: "Berhasil mendapatkan detail data",
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.create = async (req, res, next) => {
+  try {
+    const data = await service.create(req);
+    res.status(201).json({
+      message: "Berhasil membuat data",
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.update = async (req, res, next) => {
+  try {
+    const data = await service.update(req);
+    res.status(200).json({
+      message: "Berhasil memperbarui data",
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.remove = async (req, res, next) => {
+  try {
+    const data = await service.remove(req);
+    res.status(200).json({
+      message: "Berhasil menghapus data",
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 ```
 
-Note the v2 shape: CommonJS named export, plain numeric status codes,
-service-first flow, error handed to `next(err)`. No class syntax, no
-hardcoded fixtures — v1-era blog snippets resembling those do not match
-today’s output.
+`create` answers `201`; every other verb answers `200`. The message strings
+come from `VERB_MESSAGES` in `lib/generator/module/verbs.js`.
 
-### 2.2 `services/user-profile.service.js` (ORM None case)
+With `--template readonly` only `getAll` + `getById` are emitted, and the
+router registers only those two verbs.
+
+### 2.2 `services/user-profile.service.js` (ORM None)
 
 The no-ORM branch generates an in-memory store whose CRUD surface matches
-every other ORM flavor (`getAll/getById/create/update/remove`), so you can
-swap in a database later without touching controller/router layers:
+every ORM flavor (`getAll/getById/create/update/remove`), so you can swap in a
+database later without touching the controller or router:
 
 ```javascript
 // user-profile Service (No ORM - in-memory store)
 // Replace the in-memory operations with real database calls when ready.
 
-const USERPROFILE_STORE = [];
+const USER_PROFILE_STORE = [];
 
 async function getAll(req) {
   const { page = 1, limit = 10 } = req.query;
   const start = (Number(page) - 1) * Number(limit);
-  const items = USERPROFILE_STORE.slice(start, start + Number(limit));
-  return { items, total: USERPROFILE_STORE.length };
+  const items = USER_PROFILE_STORE.slice(start, start + Number(limit));
+  return { items, total: USER_PROFILE_STORE.length };
 }
 
 async function getById(req) {
   const { id } = req.params;
-  return USERPROFILE_STORE.find((item) => item.id === id) || null;
+  return USER_PROFILE_STORE.find((item) => item.id === id) || null;
 }
 
 async function create(req) {
   const item = { id: Date.now().toString(), ...req.body };
-  USERPROFILE_STORE.push(item);
+  USER_PROFILE_STORE.push(item);
   return item;
 }
 
 async function update(req) {
   const { id } = req.params;
-  const index = USERPROFILE_STORE.findIndex((item) => item.id === id);
+  const index = USER_PROFILE_STORE.findIndex((item) => item.id === id);
   if (index === -1) return null;
-  USERPROFILE_STORE[index] = { ...USERPROFILE_STORE[index], ...req.body };
-  return USERPROFILE_STORE[index];
+  USER_PROFILE_STORE[index] = { ...USER_PROFILE_STORE[index], ...req.body };
+  return USER_PROFILE_STORE[index];
 }
 
 async function remove(req) {
   const { id } = req.params;
-  const index = USERPROFILE_STORE.findIndex((item) => item.id === id);
+  const index = USER_PROFILE_STORE.findIndex((item) => item.id === id);
   if (index === -1) return null;
-  return USERPROFILE_STORE.splice(index, 1)[0];
+  return USER_PROFILE_STORE.splice(index, 1)[0];
 }
 
 module.exports = { getAll, getById, create, update, remove };
 ```
 
-Where does `USERPROFILE_STORE` come from? It is
-`camelName.toUpperCase()` of the module name plus `_STORE`
-(`user-profile` → `userProfile` → `USERPROFILE`). Pagination bounds
-arrive through query params with safe defaults (`page=1`, `limit=10`);
-`getById/update/remove` are null-returning instead of throwing so the
-controllers keep full control of status codes.
-
-Older write-ups claimed the None flavor left “TODO stubs” inside services;
-the actual template ships working in-memory CRUD with zero dependencies.
+The store constant is `toConstantCase(kebab) + "_STORE"` — `user-profile` →
+`USER_PROFILE_STORE` (an underscore between the words, not a collapsed
+`USERPROFILE`). Pagination comes from query params with safe defaults
+(`page=1`, `limit=10`); `getById/update/remove` return `null` instead of
+throwing so the controller keeps control of status codes.
 
 ### 2.3 `models/user-profile.model.js`
 
+Written **only** when `orm === "None"` (for a real ORM the ORM generator owns
+this path, so the placeholder can never shadow the real model):
+
 ```javascript
-// user-profile Model
-// Schema atau ORM Model bisa ditulis di sini.
+// UserProfile Model
+// Modul ini memakai in-memory store (ORM: None).
+// Tulis schema/ORM model di sini setelah beralih ke database nyata.
 ```
 
-Intentional placeholder. For ORM=None no model classes/schemas are invented
-(older blogs rendered fake Mongoose schemas here — never emitted by any v2
-template; see the migration guide §1.8 for how real ORM models land).
-
 ### 2.4 `routes/user-profile.router.js`
+
+Registers all five verbs plus the managed resource region that
+`rakitin add endpoint` injects into:
 
 ```javascript
 // user-profile Routes
 const express = require("express");
 const router = express.Router();
-const { getAll } = require("../controllers/user-profile.controller");
+const controller = require("../controllers/user-profile.controller");
 
-router.get("/", getAll);
+// rakitin:resources:start
+// rakitin:resources:end
+
+router.get("/", controller.getAll);
+router.get("/:id", controller.getById);
+router.post("/", controller.create);
+router.put("/:id", controller.update);
+router.delete("/:id", controller.remove);
 
 module.exports = router;
 ```
 
-Exactly one mounted route per generated pair; extended verbs belong to the
-[`add endpoint`](./cli-reference.md#46-rakitin-add-endpoint) generator.
+---
 
 ## 3. Simple tree (`--arch simple`)
 
 ```text
-app/modules/user-profile/
-├── user-profile.controller.js
-├── user-profile.service.js
-└── user-profile.router.js
+app/modules/payment/
+├── payment.controller.js
+├── payment.service.js
+└── payment.router.js
 ```
 
-### 3.1 `user-profile.controller.js`
+(No `models/` directory for the simple layout; with a real ORM the model file
+is flat: `payment.model.js` / `payment.entity.js`.)
 
-As emitted today by `simple.arch.js`:
+### 3.1 `payment.controller.js`
 
-```javascript
-// user-profile Controller
+Identical body to the modular controller except for the require path
+(`./payment.service` instead of `../services/payment.service`). The same full
+verb set is exported.
 
-const { getAll } = require("./user-profile.service");
+### 3.2 `payment.service.js`
 
-exports.getAll = async (req, res, next) => {
-  try {
-      const data = await getAll(req);
-      res.status(200).json({
-        message: "Berhasil mendapatkan data",
-        data,
-      });
-    } catch (err) {
-      next(err);
-    }
-};
-```
+Identical body to the modular service (`generateServiceCode(…, "Simple")`
+shares the ORM case text); the store constant and exports are unchanged
+because the None operation set has no architecture-relative import paths.
 
-The simple controller deliberately avoids external status-code
-packages: tier-basic output is guaranteed zero-dependency (plain `200`
-literals, matching the modular template). Older blog screenshots
-showing an `http-status-codes` import describe pre-v2 bytes and do not
-describe current templates.
-
-### 3.2 `user-profile.service.js`
-
-Identical body to the modular version above
-(`generateServiceCode(..., "Simple")` shares the ORM case text); the store
-constant and exported functions are unchanged because the None operation
-set has no architecture-relative import paths.
-
-### 3.3 `user-profile.router.js`
+### 3.3 `payment.router.js`
 
 ```javascript
-// user-profile Router
+// payment Router
 const express = require("express");
 const router = express.Router();
-const { getAll } = require("./user-profile.controller");
+const controller = require("./payment.controller");
 
-router.get("/", getAll);
+// rakitin:resources:start
+// rakitin:resources:end
+
+router.get("/", controller.getAll);
+router.get("/:id", controller.getById);
+router.post("/", controller.create);
+router.put("/:id", controller.update);
+router.delete("/:id", controller.remove);
 
 module.exports = router;
 ```
 
-Relative sibling require (`./…`) versus the modular `../controllers/…`
-chain — keep both intact if you move files between layouts.
+Relative sibling require (`./…`) versus the modular `../controllers/…` chain —
+keep both intact if you move files between layouts.
 
-## 4. Auto-router excerpt (helpers embedded)
+---
 
-When integration runs with runtime auto-detection
-(`createAutoRouterTemplate`), the produced `app/routes/index.js` embeds its
-naming helpers directly, making the output self-contained (no imports from
-the rakitin package, which will not exist in your project):
+## 4. Main-router wiring
 
-```javascript
-/* …express header… */
-const fs = require('fs');
-const path = require('path');
-
-// --- embedded helpers (self-contained, no external deps) ---
-function normalizeModuleName(name) {
-  return String(name)
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .replace(/[\s_]+/g, '-')
-    .toLowerCase();
-}
-
-function toIdentifier(name) {
-  const kebab = normalizeModuleName(name);
-  let id = kebab.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase());
-  id = id.replace(/[^A-Za-z0-9_$]/g, '');
-  if (!id) return '_';
-  if (/^[0-9]/.test(id)) return '_' + id;
-  return id;
-}
-// --- end helpers ---
-```
-
-And per-module runtime wiring inside the same file:
+`rakitin integrate` (or `add module` with `autoIntegrateRouter`) produces the
+**same shape for both architectures** — `lib/generator/router/wiring.js`
+emits a require plus a `router.use` mount, never a controller-member handler
+reference:
 
 ```javascript
-availableModules.forEach((moduleName) => {
-  const normalizedModule = normalizeModuleName(moduleName);
+const express = require('express');
+const router = express.Router();
+/* rakitin:routes:start */
+// rakitin-managed region: safe to regenerate.
+// Keep custom entries OUTSIDE these markers.
+const userProfileRouter = require('../modules/user-profile/routes/user-profile.router.js');
 
-  // 1) Modular structure: modules/<name>/routes/<name>.router.js
-  // 2) Simple structure: modules/<name>/<name>.controller.js
-  try {
-    if (fs.existsSync(modularRouterPath)) {
-      const moduleRouter = require(modularRouterPath);
-      router.use('/' + normalizedModule, moduleRouter);
-      loadedCount += 1;
-      console.log('[rakitin] Modular router loaded: ' + normalizedModule);
-    } else if (fs.existsSync(simpleControllerPath)) {
-      /* getAll / getById / create / update / delete bound defensively */
-      console.log('[rakitin] Simple routes created: ' + normalizedModule);
-    } else {
-      console.warn(
-        '[rakitin] Skipping "' + moduleName +
-        '": no valid modular/simple structure detected.'
-      );
-    }
-  } catch (error) {
-    console.error(
-      '[rakitin] Failed to load module "' + moduleName + '":', error.message
-    );
-  }
-});
+router.use('/user-profile', userProfileRouter);
+/* rakitin:routes:end */
 
-console.log('[rakitin] Auto-loaded ' + loadedCount + ' module(s).');
+module.exports = router;
 ```
 
-Failure isolation is built into the emission: a broken module logs a
-skipping warning instead of crashing boot — this replaces the older strict
-pre-validation that aborted whole integrations
-(see [router-integration.md](./router-integration.md#6-failure-handling-philosophy)).
+With `--middleware auth` the mount gains the middleware:
 
-## 5. Require-chain sanity: `payment.controller` → `payment.service`
+```javascript
+const authMiddleware = require('../shared/middlewares/auth.middleware');
+const userProfileRouter = require('../modules/user-profile/routes/user-profile.router.js');
 
-Because every filename derives from `toKebabCase(moduleName)`, chains stay
-uniformly kebab-case end to end. For a module `payment`:
+router.use('/user-profile', userProfileRouter, authMiddleware);
+```
+
+A module whose router file is missing is reported in `skipped[]` and left out
+of the block — a dangling `require` cannot be generated. Adding a module only
+diffs the wiring lines inside the markers; two consecutive runs on an
+unchanged inventory produce byte-identical output.
+
+---
+
+## 5. Require-chain sanity
+
+Because every filename derives from `toKebabCase(name)`, the chains stay
+kebab-case end to end:
 
 | Layout | File | Its own require |
 | --- | --- | --- |
-| simple | `modules/payment/payment.controller.js` | `const { getAll } = require("./payment.service");` |
-| simple | `modules/payment/payment.router.js` | `const { getAll } = require("./payment.controller");` |
-| modular | `modules/payment/controllers/payment.controller.js` | `const { getAll } = require("../services/payment.service");` |
-| modular | `modules/payment/routes/payment.router.js` | `const { getAll } = require("../controllers/payment.controller");` |
-| integration | `app/routes/index.js` (headless run) | `require('../modules/payment/routes/payment.router')` (modular) / `require('../modules/payment/payment.controller')` (simple) |
+| simple | `modules/payment/payment.controller.js` | `require("./payment.service")` |
+| simple | `modules/payment/payment.router.js` | `require("./payment.controller")` |
+| modular | `modules/payment/controllers/payment.controller.js` | `require("../services/payment.service")` |
+| modular | `modules/payment/routes/payment.router.js` | `require("../controllers/payment.controller")` |
+| integration | `app/routes/index.js` | `require('../modules/payment/payment.router.js')` (simple) / `require('../modules/payment/routes/payment.router.js')` (modular) |
 
-Divergence call-out: earlier endpoint-generation behavior could emit a
-camelCase twin controller alongside the kebab-case original in simple
-layouts. v2 removed that duplication — single canonical kebab-case pair
-per resource ([migration §1.11](./migration-v1-to-v2.md)). Any leftover
-twins from v1 projects should be deleted during your upgrade audit.
+---
 
-## 6. Marking and diff-checking output freshness
+## 6. Resource endpoints
 
-* Every generated header carries a short human-language banner
-  (`// <module-name> Controller`, etc.) without embedding version strings —
-  therefore treat tree shapes and identifier conventions above as the v2
-  fingerprint when auditing old vs new generations.
-* Services across ORMs share the `{ getAll, getById, create, update, remove }`
-  contract; when you later adopt an ORM (tier upgrade), only service
-  internals change, keeping controllers/routers/integration byte-stable —
-  that stability is the intended upgrade path described in
-  [integration-tiers.md](./integration-tiers.md#4-upgrade-paths-between-tiers).
+`rakitin add endpoint payment --resource items --fields title:string,price:number`
+adds a second, narrower CRUD surface inside the module:
+
+```text
+app/modules/payment/resources/
+├── items.resource.js
+└── items.controller.js
+```
+
+and mounts it inside the router's managed region:
+
+```javascript
+// rakitin:resources:start
+// rakitin-managed region: safe to regenerate.
+// Keep custom entries OUTSIDE these markers.
+const itemsResource = require("./resources/items.resource");
+router.use("/items", itemsResource);
+// rakitin:resources:end
+```
+
+Re-running the same command is idempotent: `created: []` and
+`mount.action: "unchanged"`. Pagination/filtering are on by default
+(`--no-pagination` / `--no-filtering` to drop them).
+
+---
+
+## 7. Test files
+
+`rakitin add test --all` (or `add module … --with-tests`, or `recipe test`)
+renders `tests/modules/<kebab>.test.js` from
+`lib/templates/test/module.test.ejs`:
+
+- structural assertions (module dir, controller, router) that only need
+  `fs`/`path` and work for both layouts;
+- an HTTP smoke block against `/api/<kebab>` that is skipped when
+  `SKIP_HTTP_TESTS=1` (so CI can run without `express`/`supertest`).
+
+```bash
+SKIP_HTTP_TESTS=1 npx jest tests/modules/payment.test.js
+```
+
+---
+
+## 8. Marking and diff-checking output freshness
+
+- Every generated header carries a short human-language banner
+  (`// <module-name> Controller`, …) without embedding version strings.
+- Services across ORMs share the
+  `{ getAll, getById, create, update, remove }` contract; adopting an ORM
+  later changes only service internals, keeping controller/router/wiring
+  byte-stable — that stability is the intended upgrade path
+  ([integration-tiers.md](./integration-tiers.md#4-presets)).
+- Generated JS is validated by compiling it (`new vm.Script` / `node --check`),
+  never by executing it.

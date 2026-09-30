@@ -1,5 +1,5 @@
 /**
- * ESLint flat config (v9) - pragmatic gates for rakitin.
+ * ESLint flat config - pragmatic gates for rakitin.
  * Strict about correctness; style minutiae owned by Prettier.
  */
 
@@ -8,13 +8,7 @@ const globals = require("globals");
 
 module.exports = [
   {
-    ignores: [
-      "node_modules/**",
-      "coverage/**",
-      "dist/**",
-      "examples/**/*.js",
-      "tests/temp/**",
-    ],
+    ignores: ["node_modules/**", "coverage/**", "examples/**/*.js", "tests/temp/**"],
   },
 
   {
@@ -41,13 +35,21 @@ module.exports = [
     },
   },
 
-  // Library surface - rules tied to historical footguns fixed in v2
+  // Library surface - rules tied to historical footguns fixed in v2/v3
   {
-    files: ["lib/**/*.js", "bin/**/*.js", "index.js"],
+    files: ["lib/**/*.js", "bin/**/*.js"],
     rules: {
       "no-template-curly-in-string": "warn",
       "no-new-wrappers": "error",
+      // stdout purity: --json output must be the ONLY thing on stdout.
+      "no-console": "error",
     },
+  },
+
+  // The logger is the single sanctioned console writer.
+  {
+    files: ["lib/utils/logger.js"],
+    rules: { "no-console": "off" },
   },
 
   // Tests are intentionally pragmatic

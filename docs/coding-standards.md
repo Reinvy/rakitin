@@ -13,7 +13,7 @@
 | Area | Rule | Examples |
 | --- | --- | --- |
 | **Generators only** (`lib/generator/**`) | kebab-case file names carrying an explicit role suffix describing what the file produces: `.arch.js` for architecture blueprints, `.orm.js` for ORM wiring, plus the feature noun it generates. | `simple.arch.js`, `modular.arch.js`, `prisma.orm.js`, `mongoose.orm.js`, `orm-service-generator.js` |
-| **Everything else in `lib/`** (`lib/*`, `lib/commands/`, `lib/deps/`, `lib/project/`, `lib/template/`, `lib/ui/`, `lib/utils/`) | Domain-named single words or kebab-case phrases — no role suffix. The module *is* the domain concept. | `naming.js`, `safety.js`, `constants.js`, `installer.js`, `detector.js`, `manifest.js`, `shared.js`, `error-handler.js`, `path-resolver.js`, `validation-utils.js` |
+| **Everything else in `lib/`** (`lib/*`, `lib/commands/`, `lib/deps/`, `lib/project/`, `lib/template/`, `lib/ui/`, `lib/utils/`, `lib/plugins/`) | Domain-named single words or kebab-case phrases — no role suffix. The module *is* the domain concept. | `naming.js`, `safety.js`, `constants.js`, `installer.js`, `detector.js`, `manifest.js`, `shared.js`, `validation-utils.js`, `plugin-seam.js`, `wiring.js` |
 | Tests | `<subject>.test.js` next to their layer folders (`tests/unit/`, `tests/lib/…`, `tests/integration/`, `tests/regression/`). Jest matches `**/tests/**/*.test.js`. | `naming.test.js`, `installer.test.js`, `p0-bugfixes.test.js` |
 
 Do not introduce new role-suffix families. If you find yourself inventing
@@ -38,24 +38,22 @@ Do not introduce new role-suffix families. If you find yourself inventing
 ## 2. Module system
 
 - **CommonJS only**: `const x = require("x")` / `module.exports = { … }`.
-  No ESM syntax in shipped code (the CLI targets Node >= 18 and is loaded as CJS).
+  No ESM syntax in shipped code — the package is CJS-only
+  (`main: lib/index.js`, `exports` subpaths with `types` + `default`, no
+  `import` condition) and targets Node `^22.13.0 || >=23.5.0`. ESM consumers
+  use CJS interop; the `dist/` ESM build no longer exists.
 - **Barrels stay thin**: barrel files re-export their sibling(s) and nothing else.
-  - `lib/utils/index.js` → `module.exports = require("./logger.js");`
+  - `lib/utils/index.js` → `module.exports = require("../utils.js");`
   - `lib/ui/index.js` → same pattern for progress UI.
   - `lib/template/index.js` → same pattern for the engine.
+  - `lib/commands/index.js` re-exports the command functions + `buildContext`/
+    `printResult`/`printFailure`/`enableJsonMode`.
   - Aggregating barrels may spread (`lib/generator/module/arch/arch.js`
     spreads `simpleArch` + `modularArch`).
-- **`__esModule` compat fields stay where they exist.** Legacy surfaces such as
-  `lib/installer.js` and `lib/utils.js` end with:
-
-  ```js
-  module.exports.__esModule = true;
-  module.exports.default = module.exports;
-  ```
-
-  Keep them on modules that already have them (transpiled Babel-era consumers
-  interop with them); do NOT add them to brand-new modules unless such
-  interoperability is actually required — prefer clean named exports.
+- **No `__esModule` compat fields.** They were removed with the Babel-era
+  build; the only remaining `__esModule` reference is the plugin loader
+  unwrapping `mod.default` from a transpiled plugin module. Export clean
+  named properties.
 
 ---
 
@@ -88,40 +86,51 @@ Minimum bar:
 
 ## 4. Error handling contract
 
-Two error utilities exist with different semantics — know which you're using:
+v3 has **one** error path. The v2 helpers
+(`lib/generator/shared/error-handler.js`'s `ErrorHandler`, and
+`validation-utils.handleError`) were deleted.
 
-### 4.1 `validation-utils.handleError(context, error)` — ALWAYS rethrows
+### 4.1 Throw; the command wrapper prints
 
-Located at `lib/generator/shared/validation-utils.js`. It logs
-`❌ Kesalahan di <context>: <error.message>` then **throws unconditionally**
-(either the original error when its message already reads like a failure, or a
-new `Error("Gagal <context>: <message>")` wrapped around it).
+- Library and generator code **throws** plain `Error`s with actionable
+  messages (what was wrong + how to fix it, e.g.
+  `Nama module tidak valid: "../evil". Gunakan huruf, angka, "-" atau "_" tanpa pemisah path.`).
+  Never `process.exit()`, never `console.error` (the `lib/**` `no-console`
+  rule is `error`), never log-and-return `undefined`.
+- `bin/rakitin.js`'s `run()` wrapper catches, calls
+  `printFailure(error, json)` — `{ok:false, error}` on stdout in JSON mode, a
+  `❌` logger line otherwise — and sets `process.exitCode = 1`. That is the
+  only place a failure becomes an exit code.
+- `lib/commands/doctor.js` is the deliberate exception: a failing check sets
+  `process.exitCode = 1` **and** `ok:false` without throwing, because a health
+  report must list every finding.
 
-Consequence: wrapping a body in `try/catch { handleError(...) }` preserves
-failure propagation — it does not swallow. `lib/generator/module/arch/*.arch.js`
-rely on this: invalid module names abort generation via this path.
+### 4.2 `lib/generator/shared/validation-utils.js`
 
-### 4.2 `ErrorHandler.handleError(error, context, shouldThrow = true)`
+It exports only input validators:
 
-Class-based helper at `lib/generator/shared/error-handler.js`. Semantics of the
-third parameter:
+```js
+const {
+  VALID_ORMS, VALID_ARCHITECTURES,
+  validateModuleName, validateOrm, validateArchitecture,
+} = require("../shared/validation-utils");
+```
 
-- `shouldThrow === true` (default): logs, writes to `logs/rakitin-errors.log`,
-  then **rethrows** the original error. Use for fatal paths.
-- `shouldThrow === false`: logs + records formatted info via `formatError`,
-  then **returns** `{ type, message, context, stack, details, timestamp }`.
-  All the `handleFileNotFoundError` / `handleModuleValidationError` /
-  `handleRouterIntegrationErrors` convenience statics use `shouldThrow=false`
-  so interactive flows can report multiple problems before bailing out.
+`validateModuleName(name)` returns `{ isValid, message }` and delegates to
+`naming.assertSafeName` for the charset/path-traversal rules; it does not
+throw and does not log. New ingress points should prefer
+`naming.assertSafeName(kind, raw)` directly (it throws and returns the kebab
+form).
 
-Rules:
+### 4.3 Conventions
 
-- Library code never `process.exit()`s; only `bin/rakitin.js`'s `fail()` does,
-  after printing JSON (`{ ok:false, error }`) or human output.
-- Create typed errors with `ErrorHandler.createError(type, message, details)`
-  so `error.type` is set from `ERROR_TYPES`.
-- Never log-and-return `undefined` silently from catch blocks; either route
-  through one of the two handlers above or attach recovery behavior explicitly.
+- Attach a `cause` when wrapping: `new Error(msg, { cause: error })`.
+- Message language follows the surrounding surface: user-facing CLI errors are
+  Indonesian, JSDoc and code comments are English.
+- Never swallow an error in a catch block: rethrow it, or convert it into a
+  reported result (`{ success:false, failed:[…] }`, a `warn` check, an
+  `errors[]` entry). The plugin loader is the reference for
+  "report, never abort".
 
 ---
 
@@ -147,10 +156,12 @@ Rules:
 
 - Async functions return Promises for data (`{ success, installed, failed }`),
   never mutate shared result objects across awaits.
-- Do not mix sync shell-outs (`execSync`) into new async paths except in the
-  legacy recipes scaffolding already reviewed; sync spawns block the event loop
-  and break the retry/spinner UX. New commands go through
-  `installer.executeWithRetry` → `internals.execCommand` (spawn-based).
+- Do not use sync shell-outs (`execSync`) anywhere. Every install and every
+  `npx`-style invocation goes through
+  `installer.executeWithRetry` → `internals.execCommand` (spawn-based,
+  `shell: false`), or through the manifest
+  (`ensureDependencies(kinds, { pm, install })`). Sync spawns block the event
+  loop and bypass `--no-install`/`--dry-run`/`--pm`.
 - Long-running generator work invoked from the command layer is wrapped with
   `withSpinner(label, fn)` (`lib/commands/shared.js`) which no-ops cleanly in
   non-TTY/JSON/Jest environments.
@@ -177,8 +188,8 @@ const { modulesPath } = require("../constants");
 const modulePath = path.join(modulesPath, name);   // captured-at-load constant
 ```
 
-(For path *computation* against a known base, `utils.getCachedModulePath(name,
-basePath, type)` is fine — its cache key includes basePath.)
+(For path *computation* against a known base, pass the root explicitly to
+`getPaths(root)` rather than relying on `process.cwd()`.)
 
 ### WHY — the test-cwd scenario
 
@@ -213,13 +224,15 @@ Four hard gates apply to anything that emits project files:
 
 1. **All writes go through the safety layer.** Use
    `safety.writeFileIfNotExistsSafe(filePath, content)` directly, or
-   `utils.writeFileIfNotExists` (the legacy alias delegating to
-   `safety.legacyWriteIfAbsent`) so existing code keeps dry-run/plan semantics.
-   Overwriting is only allowed via `safety.overwriteWithBackup` (creates
-   `<file>.bak`). Bare `fs.writeFileSync` on user-project files will not pass
-   review — the exceptions that exist (recipe `package.json` script merge,
-   `.env.example` appending in `mergeEnvExample`) are deliberate, append-only
-   operations.
+   `utils.writeFileIfNotExists` (a plan-aware delegate with the same
+   semantics). Re-writing an existing generated file is only allowed via
+   `safety.overwriteWithBackup` (uniquely named `.bak`) or by passing
+   `--overwrite` through the global overwrite mode. For JSON files use
+   `safety.updateJsonFile`, for `.env.example` use
+   `safety.mergeEnvExample`, and for managed regions use
+   `safety.buildMarkedBlock`. Bare `fs.writeFileSync` against user-project
+   files will not pass review — it bypasses dry-run, backups and the marker
+   engine.
 2. **Generated identifiers via `toIdentifier()`.** Every place a user-supplied
    string becomes a JS identifier in emitted source
    (`const ${id} = require(...)` etc.) uses
@@ -244,10 +257,11 @@ Four hard gates apply to anything that emits project files:
    optional.
 
 Also: keep generated templates self-contained unless they legitimately require
-a project-local module. The auto-router embeds its own mini
-`normalizeModuleName`/`toIdentifier` helpers precisely so generated code works
-inside the *user's* project, not just inside rakitin. Pure content builders
-(`buildRoutesContent(existing, lines)`) should stay pure to remain dry-run-safe.
+a project-local module, and never require anything from the `rakitin` package
+inside generated code (it will not exist in the user's project — the generated
+WebSocket/GraphQL layers require `ws`/`graphql`, which the manifest installs).
+Pure content builders (`buildRoutesContent(existing, lines)`,
+`buildMarkedBlock(...)`) stay pure so they remain dry-run-safe.
 
 ---
 
@@ -271,13 +285,20 @@ inside the *user's* project, not just inside rakitin. Pure content builders
    - `beforeAll`/`afterAll` own directory creation/removal (don't delete
      `tempDir` itself mid-suite);
    - `afterEach` empties contents, runs `jest.clearAllMocks()`, resets Logger
-     instances (`Logger.clearInstances()`) and clears `utils.clearPathCache()`;
+     instances (`Logger.clearInstances()`) and resets the safety plan
+     (`safety.resetPlan()`);
    - Anything else you mutate globally (e.g. swapping `installer.internals`)
      is saved and restored by YOUR suite in `afterAll`, following the
      `savedInternals = { ...installer.internals }` pattern from
      `tests/lib/installer.test.js`.
-4. **No network, ever.** Shell/package-manager execution goes through
-   `installer.internals`, so stub it instead of touching child processes:
+   - The repo-integrity guard in `afterAll` hashes `package.json` and
+     `package-lock.json`; a suite that mutates either fails the run with
+     `[hermetic] test run memodifikasi <file>`.
+4. **No network, ever.** `tests/setup.js` blocks `child_process`
+   (`__mocks__/child_process.js` throws for `exec/execSync/spawn/spawnSync`
+   unless a suite sets `global.__RAKITIN_REAL_CHILD_PROCESS__ = true`), and
+   shell execution goes through `installer.internals`, so stub it instead of
+   touching child processes:
 
    ```js
    installer.internals.execCommand = jest.fn().mockResolvedValue({
@@ -293,21 +314,25 @@ inside the *user's* project, not just inside rakitin. Pure content builders
 5. **Prompt-driven flows are tested headlessly** — exercise the non-interactive
    core function or drive `addCommand(thing, name, ctx)` with fully-populated
    context (`yes: true`) rather than scripting stdin/inquirer mocks.
-6. Coverage is collected automatically (`collectCoverageFrom` covers `lib/**`,
-   `bin/**`, `index.js`); keep assertions specific rather than chasing the
-   percentage.
+6. Coverage is collected automatically (`collectCoverageFrom` covers `lib/**`
+   and `bin/**`, excluding `lib/templates/**`); keep assertions specific
+   rather than chasing the percentage.
 
 ---
 
 ## 9. Formatting
 
-Current source conventions (enforced by review until tooling lands):
+Prettier is wired (`prettier` is a devDependency; `npm run format` /
+`npm run format:check` cover `lib/**/*.js`, `bin/*.js`, `tests/**/*.js`).
+Match the file you are editing and resist formatting-only reflows bundled into
+functional PRs; run `npm run format:check` before opening one.
+
+Source conventions:
 
 - **Indentation:** 2 spaces, no tabs.
-- **Quotes:** double quotes in `lib/` (+ `"use"` of double quotes inside
-  generated output too); some generator/shared files retain single quotes from
-  legacy — do not churn unrelated lines, but new code uses doubles.
-- **Semicolons:** always, including on multi-line expressions.
+- **Quotes:** double quotes in `lib/` and `bin/` (enforced by ESLint
+  `quotes: ["warn", "double", { avoidEscape: true }]`).
+- **Semicolons:** always (ESLint `semi: ["error", "always"]`).
 - **Arrow preference:** arrows for callbacks and small lambdas;
   `function` declarations are fine for hoisted top-level helpers (the installer
   relies on declaration hoisting when populating `internals`).
@@ -315,7 +340,3 @@ Current source conventions (enforced by review until tooling lands):
   carefully inside generated sources.
 - Trailing newline at EOF; JSON artifacts written by generators are serialized
   with `JSON.stringify(obj, null, 2) + "\n"`.
-
-Prettier integration is scheduled for **Phase 6**; when it lands it will codify
-print width and quote/arrow settings mechanically — until then, match the file
-you are editing and resist formatting-only reflows bundled into functional PRs.

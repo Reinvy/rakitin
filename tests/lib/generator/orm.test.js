@@ -1,113 +1,228 @@
 /**
- * ORM generator tests - REAL disk execution; network/shell is stubbed via
- * child_process mock (ORM files hardcode execSync npm installs).
+ * ORM generator tests - driver-free.
+ *
+ * `child_process` is globally mocked (tests/setup.js), so any attempt to
+ * shell out from a generator would throw `[hermetic] child_process.spawn …`.
+ * Each generator uses `process.cwd()` (= this suite's temp dir).
  */
-const fs = require("fs-extra");
+
+const fs = require("fs");
 const path = require("path");
+const {
+  prismaORM,
+  sequelizeORM,
+  mongooseORM,
+  typeormORM,
+} = require("../../../lib/generator/module/orm/orm");
+const installer = require("../../../lib/installer");
 
-jest.mock("child_process", () => ({
-  ...jest.requireActual("child_process"),
-  execSync: jest.fn(),
-}));
+const read = (rel) => fs.readFileSync(path.join(global.tempDir, rel), "utf8");
+const exists = (rel) => fs.existsSync(path.join(global.tempDir, rel));
 
-const { prismaORM } = require("../../../lib/generator/module/orm/prisma.orm");
-const { sequelizeORM } = require("../../../lib/generator/module/orm/sequelize.orm");
-const { mongooseORM } = require("../../../lib/generator/module/orm/mongoose.orm");
-const { typeormORM } = require("../../../lib/generator/module/orm/typeorm.orm");
-const { getPaths } = require("../../../lib/constants");
-const { execSync } = require("child_process");
+function expectRelativeAndOnDisk(entries) {
+  expect(entries.length).toBeGreaterThan(0);
+  for (const entry of entries) {
+    expect(path.isAbsolute(entry)).toBe(false);
+    expect(entry).not.toContain("\\");
+    expect(exists(entry)).toBe(true);
+  }
+}
 
-beforeEach(() => {
-  jest.clearAllMocks();
-  jest.spyOn(console, "log").mockImplementation(() => {});
-  jest.spyOn(console, "warn").mockImplementation(() => {});
-});
+describe("ORM generators", () => {
+  test("never spawn an installer (installs are declared in the manifest)", async () => {
+    await prismaORM("spawnfree");
+    await sequelizeORM("spawnfree", "Modular");
+    await mongooseORM("spawnfree", "Modular");
+    await typeormORM("spawnfree", "Modular");
 
-afterEach(() => {
-  jest.restoreAllMocks();
-});
-
-describe("prismaORM", () => {
-  test("writes the model and creates the db.js singleton", async () => {
-    await prismaORM("user-profile");
-
-    const p = getPaths();
-    const baseFile = path.join(p.prismaPath, "base.prisma");
-    const modelFile = path.join(p.prismaPath, "user-profile.prisma");
-    expect(fs.existsSync(baseFile)).toBe(true);
-    expect(fs.existsSync(modelFile)).toBe(true);
-    expect(fs.readFileSync(modelFile, "utf8")).toContain("model UserProfile");
-
-    // Previously services referenced app/shared/config/db.js which was
-    // never generated - now it must exist.
-    const dbConfig = path.join(p.sharedPath, "config", "db.js");
-    expect(fs.existsSync(dbConfig)).toBe(true);
-    expect(fs.readFileSync(dbConfig, "utf8")).toContain("new PrismaClient");
-
-    // Prisma 7 config file
-    expect(fs.existsSync(path.join(process.cwd(), "prisma.config.js"))).toBe(true);
+    expect(installer.internals.spawn).not.toHaveBeenCalled();
+    expect(installer.internals.execCommand).not.toHaveBeenCalled();
   });
 
-  test("throws on missing module name", async () => {
-    await expect(prismaORM("")).rejects.toThrow();
+  describe("prisma", () => {
+    test("writes the model, the multi-file base schema, config, client and DATABASE_URL", async () => {
+      const result = await prismaORM("order");
+
+      expectRelativeAndOnDisk(result.created);
+      expect(result.created).toEqual(
+        expect.arrayContaining([
+          "prisma/schema/order.prisma",
+          "prisma/schema/base.prisma",
+          "prisma.config.js",
+          "app/shared/config/db.js",
+          ".env.example",
+        ])
+      );
+
+      expect(read("prisma/schema/order.prisma")).toContain("model Order");
+      // Prisma 7 multi-file schema: datasource lives in base.prisma, the
+      // connection URL is supplied by prisma.config.js from DATABASE_URL.
+      expect(read("prisma/schema/base.prisma")).toContain("datasource db {");
+      expect(read("prisma/schema/base.prisma")).toContain('provider = "postgresql"');
+      expect(read("prisma.config.js")).toContain('require("dotenv").config()');
+      expect(read("prisma.config.js")).toContain('schema: "prisma/schema"');
+      expect(read("prisma.config.js")).toContain('url: process.env["DATABASE_URL"]');
+      expect(read("app/shared/config/db.js")).toContain("module.exports = { prisma }");
+      expect(read(".env.example")).toContain("DATABASE_URL");
+    });
+
+    test("is idempotent on rerun", async () => {
+      await prismaORM("order-again");
+      const second = await prismaORM("order-again");
+
+      expect(second.created).toEqual([]);
+      expect(second.skipped).toEqual(
+        expect.arrayContaining([
+          "prisma/schema/order-again.prisma",
+          "prisma/schema/base.prisma",
+          "prisma.config.js",
+          "app/shared/config/db.js",
+          ".env.example",
+        ])
+      );
+    });
   });
-});
 
-describe("sequelizeORM", () => {
-  test.each(["Modular", "Simple"])(
-    "writes a default-export model (%s)",
-    async (architecture) => {
-      await sequelizeORM("order-item", architecture);
+  describe("sequelize", () => {
+    test("writes a modular model exporting the PascalCase model + database singleton", async () => {
+      const result = await sequelizeORM("invoice", "Modular");
 
-      const modulesDir = getPaths().modulesPath;
-      const rel =
-        architecture === "Modular"
-          ? path.join(modulesDir, "order-item", "models")
-          : path.join(modulesDir, "order-item");
-      const modelFile = path.join(rel, "order-item.model.js");
+      expectRelativeAndOnDisk(result.created);
+      expect(result.created).toEqual(
+        expect.arrayContaining([
+          "app/modules/invoice/models/invoice.model.js",
+          "app/shared/config/database.js",
+        ])
+      );
+      expect(read("app/modules/invoice/models/invoice.model.js")).toContain(
+        "module.exports = Invoice;"
+      );
+      expect(read("app/modules/invoice/models/invoice.model.js")).toContain(
+        'require("../../../shared/config/database")'
+      );
+      expect(read("app/shared/config/database.js")).toContain("new Sequelize(");
+    });
 
-      expect(fs.existsSync(modelFile)).toBe(true);
-      const src = fs.readFileSync(modelFile, "utf8");
-      // B-med fix: single default export matching the service import
-      expect(src).toContain("module.exports = OrderItem;");
-    }
-  );
+    test("writes a simple-architecture model beside the module files", async () => {
+      const result = await sequelizeORM("receipt", "Simple");
 
-  test("shells out to install sequelize + mysql2 when missing", async () => {
-    await sequelizeORM("blog", "Simple");
-    const calls = execSync.mock.calls.map((c) => c[0]);
-    expect(calls.some((c) => c.includes("npm install sequelize"))).toBe(true);
-    expect(calls.some((c) => c.includes("npm install mysql2"))).toBe(true);
+      expect(result.created).toContain("app/modules/receipt/receipt.model.js");
+      expect(read("app/modules/receipt/receipt.model.js")).toContain(
+        "module.exports = Receipt;"
+      );
+    });
+
+    test("is idempotent on rerun", async () => {
+      await sequelizeORM("invoice", "Modular");
+      const second = await sequelizeORM("invoice", "Modular");
+
+      expect(second.created).toEqual([]);
+      expect(second.skipped).toEqual(
+        expect.arrayContaining([
+          "app/modules/invoice/models/invoice.model.js",
+          "app/shared/config/database.js",
+        ])
+      );
+    });
   });
-});
 
-describe("mongooseORM", () => {
-  test("writes kebab-case model file for hyphenated names", async () => {
-    await mongooseORM("user-profile", "Modular");
+  describe("mongoose", () => {
+    test("writes a model exporting <camel>Model + the connection singleton", async () => {
+      const result = await mongooseORM("customer", "Modular");
 
-    const modelFile = path.join(
-      getPaths().modulesPath,
-      "user-profile",
-      "models",
-      "user-profile.model.js"
-    );
-    expect(fs.existsSync(modelFile)).toBe(true);
-    const src = fs.readFileSync(modelFile, "utf8");
-    expect(src).toMatch(/mongoose\.Schema|model\(/i);
+      expectRelativeAndOnDisk(result.created);
+      expect(result.created).toEqual(
+        expect.arrayContaining([
+          "app/modules/customer/models/customer.model.js",
+          "app/shared/config/db.js",
+          ".env.example",
+        ])
+      );
+      expect(read("app/modules/customer/models/customer.model.js")).toContain(
+        "module.exports = customerModel;"
+      );
+      expect(read("app/modules/customer/models/customer.model.js")).toContain(
+        "mongoose.model("
+      );
+      expect(read("app/shared/config/db.js")).toContain("mongoose.connect");
+      expect(read(".env.example")).toContain("MONGODB_URI");
+    });
+
+    test("writes a simple-architecture model beside the module files", async () => {
+      const result = await mongooseORM("contact", "Simple");
+
+      expect(result.created).toContain("app/modules/contact/contact.model.js");
+      expect(read("app/modules/contact/contact.model.js")).toContain(
+        "module.exports = contactModel;"
+      );
+    });
+
+    test("is idempotent on rerun", async () => {
+      await mongooseORM("customer", "Modular");
+      const second = await mongooseORM("customer", "Modular");
+
+      expect(second.created).toEqual([]);
+      expect(second.skipped).toEqual(
+        expect.arrayContaining([
+          "app/modules/customer/models/customer.model.js",
+          "app/shared/config/db.js",
+          ".env.example",
+        ])
+      );
+    });
   });
-});
 
-describe("typeormORM", () => {
-  test("creates entity file and shared data-source config", async () => {
-    await typeormORM("invoice", "Modular");
+  describe("typeorm", () => {
+    test("writes an entity + the DataSource singleton", async () => {
+      const result = await typeormORM("product", "Modular");
 
-    const moduleDir = path.join(getPaths().modulesPath, "invoice");
-    expect(fs.existsSync(path.join(moduleDir, "entities", "invoice.entity.js"))).toBe(
-      true
-    );
+      expectRelativeAndOnDisk(result.created);
+      expect(result.created).toEqual(
+        expect.arrayContaining([
+          "app/modules/product/entities/product.entity.js",
+          "app/shared/config/data-source.js",
+          ".env.example",
+        ])
+      );
+      expect(read("app/modules/product/entities/product.entity.js")).toContain(
+        "module.exports = Product;"
+      );
+      expect(read("app/shared/config/data-source.js")).toContain("new DataSource(");
+      expect(read("app/shared/config/data-source.js")).toContain("module.exports = { AppDataSource }");
+    });
 
-    const dataSource = path.join(getPaths().sharedPath, "config", "data-source.js");
-    expect(fs.existsSync(dataSource)).toBe(true);
-    expect(execSync).toHaveBeenCalled(); // typeorm + reflect-metadata
+    test("writes a simple-architecture entity beside the module files", async () => {
+      const result = await typeormORM("shipment", "Simple");
+
+      expect(result.created).toContain("app/modules/shipment/shipment.entity.js");
+      expect(read("app/modules/shipment/shipment.entity.js")).toContain(
+        "module.exports = Shipment;"
+      );
+    });
+
+    test("is idempotent on rerun", async () => {
+      await typeormORM("product", "Modular");
+      const second = await typeormORM("product", "Modular");
+
+      expect(second.created).toEqual([]);
+      expect(second.skipped).toEqual(
+        expect.arrayContaining([
+          "app/modules/product/entities/product.entity.js",
+          "app/shared/config/data-source.js",
+          ".env.example",
+        ])
+      );
+    });
+  });
+
+  describe("guards", () => {
+    test.each([
+      ["prisma", prismaORM],
+      ["sequelize", sequelizeORM],
+      ["mongoose", mongooseORM],
+      ["typeorm", typeormORM],
+    ])("%s rejects an empty module name", async (_name, generator) => {
+      await expect(generator("", "Modular")).rejects.toThrow();
+    });
   });
 });

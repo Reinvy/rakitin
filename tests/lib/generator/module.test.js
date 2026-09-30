@@ -1,144 +1,269 @@
-const fs = require("fs-extra");
+/**
+ * Module wiring engine tests (lib/generator/router/wiring.js) plus the
+ * integration regression guards for the v3 mount contract:
+ *
+ *   const <id>Router = require('<relative>');
+ *   router.use('/<kebab>', <id>Router);
+ *
+ * A simple-architecture module must NEVER be wired through
+ * `controller.<verb>` handler references (that crashed the generated app at
+ * boot), and a real-ORM modular module must never get the placeholder model.
+ */
+
+const fs = require("fs");
 const path = require("path");
-const generateModule = require("../../../lib/generator/module/module");
-
-jest.mock("inquirer", () => ({
-  __esModule: true,
-  default: { prompt: jest.fn() },
-}));
-jest.mock("../../../lib/generator/module/arch/arch", () => ({
-  simpleArch: jest.fn(),
-  modularArch: jest.fn(),
-}));
-jest.mock("../../../lib/generator/module/orm/orm", () => ({
-  prismaORM: jest.fn(),
-  sequelizeORM: jest.fn(),
-  mongooseORM: jest.fn(),
-  typeormORM: jest.fn(),
-  noneORM: jest.fn(),
-}));
-jest.mock("../../../lib/installer", () => ({
-  installOrmPackages: jest
-    .fn()
-    .mockResolvedValue({ success: true, installed: [], failed: [] }),
-  installIfNeeded: jest.fn(),
-}));
-jest.mock("../../../lib/generator/shared/validation-utils", () => ({
-  validateModuleName: jest.fn().mockReturnValue({ isValid: true }),
-  validateOrm: jest.fn().mockReturnValue({ isValid: true }),
-  validateArchitecture: jest.fn().mockReturnValue({ isValid: true }),
-  createErrorMessage: jest.fn((type, details) => `${type}: ${details}`),
-  handleError: jest.fn((context, error) => {
-    throw error;
-  }),
-}));
-jest.mock("../../../lib/generator/router/router", () => ({
-  integrateAutoRouter: jest.fn().mockResolvedValue(true),
-}));
-
-const inquirer = require("inquirer");
-const { simpleArch, modularArch } = require("../../../lib/generator/module/arch/arch");
+const { simpleArch } = require("../../../lib/generator/module/arch/simple.arch");
+const { modularArch } = require("../../../lib/generator/module/arch/modular.arch");
 const {
-  prismaORM,
-  sequelizeORM,
-  typeormORM,
-} = require("../../../lib/generator/module/orm/orm");
-const { installOrmPackages } = require("../../../lib/installer");
-const { integrateAutoRouter } = require("../../../lib/generator/router/router");
-const validationUtils = require("../../../lib/generator/shared/validation-utils");
+  routerFileFor,
+  requirePathFor,
+  routerIdFor,
+  buildWiringEntries,
+  buildMiddlewareEntries,
+  renderRouteLines,
+} = require("../../../lib/generator/router/wiring");
+const { createMiddleware } = require("../../../lib/generator/middleware/middleware");
+const { integrateCommand } = require("../../../lib/commands/integrate");
 
-function restoreValidationDefaults() {
-  // jest.clearAllMocks() wipes factory-level implementations; restore them.
-  validationUtils.validateModuleName.mockReturnValue({ isValid: true });
-  validationUtils.validateOrm.mockReturnValue({ isValid: true });
-  validationUtils.validateArchitecture.mockReturnValue({ isValid: true });
+const root = () => process.cwd();
+const abs = (rel) => path.join(global.tempDir, rel);
+const read = (rel) => fs.readFileSync(abs(rel), "utf8");
+
+function write(rel, content) {
+  const file = abs(rel);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content, "utf8");
 }
 
-function mockAnswers(overrides = {}) {
-  inquirer.default.prompt.mockResolvedValue({
-    moduleName: "user-profile",
-    architecture: "Modular",
-    useORM: "Yes",
-    orm: "Prisma",
-    autoIntegrateRouter: false,
-    ...overrides,
-  });
-}
+describe("wiring engine", () => {
+  describe("path helpers", () => {
+    test("routerFileFor resolves per architecture", () => {
+      expect(routerFileFor(root(), "user", "modular")).toBe(
+        path.join(global.tempDir, "app", "modules", "user", "routes", "user.router.js")
+      );
+      expect(routerFileFor(root(), "user", "simple")).toBe(
+        path.join(global.tempDir, "app", "modules", "user", "user.router.js")
+      );
+    });
 
-beforeEach(() => {
-  jest.clearAllMocks();
-  restoreValidationDefaults();
-  jest.spyOn(console, "log").mockImplementation(() => {});
+    test("requirePathFor is relative to app/routes/index.js", () => {
+      expect(requirePathFor("order-item", "modular")).toBe(
+        "../modules/order-item/routes/order-item.router.js"
+      );
+      expect(requirePathFor("order-item", "simple")).toBe(
+        "../modules/order-item/order-item.router.js"
+      );
+    });
+
+    test("routerIdFor produces a valid identifier", () => {
+      expect(routerIdFor("order-item")).toBe("orderItemRouter");
+      const { RESERVED_WORDS } = require("../../../lib/naming");
+      for (const kebab of ["new", "class", "123abc"]) {
+        expect(RESERVED_WORDS.has(routerIdFor(kebab))).toBe(false);
+        expect(routerIdFor(kebab)).toMatch(/^[A-Za-z_$][A-Za-z0-9_$]*$/);
+      }
+    });
+  });
+
+  describe("buildWiringEntries", () => {
+    test("includes modules whose router file exists (both architectures)", async () => {
+      await simpleArch("blog", "None");
+      await modularArch("order", "None");
+
+      const { entries, skipped } = buildWiringEntries(
+        [
+          { dirName: "blog", name: "blog", architecture: "simple" },
+          { dirName: "order", name: "order", architecture: "modular" },
+        ],
+        { root: root() }
+      );
+
+      expect(skipped).toEqual([]);
+      expect(entries).toEqual([
+        {
+          kebab: "blog",
+          architecture: "simple",
+          id: "blogRouter",
+          mountPath: "/blog",
+          routerFile: abs("app/modules/blog/blog.router.js"),
+          relRequireFromRoutes: "../modules/blog/blog.router.js",
+        },
+        {
+          kebab: "order",
+          architecture: "modular",
+          id: "orderRouter",
+          mountPath: "/order",
+          routerFile: abs("app/modules/order/routes/order.router.js"),
+          relRequireFromRoutes: "../modules/order/routes/order.router.js",
+        },
+      ]);
+    });
+
+    test("skips a module whose router file is missing instead of emitting a dangling require", () => {
+      const { entries, skipped } = buildWiringEntries(
+        [{ dirName: "ghost", name: "ghost", architecture: "modular" }],
+        { root: root() }
+      );
+
+      expect(entries).toEqual([]);
+      expect(skipped).toHaveLength(1);
+      expect(skipped[0].name).toBe("ghost");
+      expect(skipped[0].reason).toBe(
+        "file router tidak ditemukan: app/modules/ghost/routes/ghost.router.js"
+      );
+    });
+
+    test("skips a module whose architecture could not be detected", () => {
+      const { entries, skipped } = buildWiringEntries(
+        [{ dirName: "mixed", name: "mixed", architecture: null }],
+        { root: root() }
+      );
+
+      expect(entries).toEqual([]);
+      expect(skipped).toEqual([{ name: "mixed", reason: "arsitektur modul tidak dikenali" }]);
+    });
+  });
+
+  describe("renderRouteLines", () => {
+    test("emits require + router.use for every entry and never controller members", async () => {
+      await simpleArch("blog", "None");
+      await modularArch("order", "None");
+      const { entries } = buildWiringEntries(
+        [
+          { name: "blog", architecture: "simple" },
+          { name: "order", architecture: "modular" },
+        ],
+        { root: root() }
+      );
+
+      const lines = renderRouteLines(entries);
+
+      expect(lines).toContain("const blogRouter = require('../modules/blog/blog.router.js');");
+      expect(lines).toContain(
+        "const orderRouter = require('../modules/order/routes/order.router.js');"
+      );
+      expect(lines).toContain("router.use('/blog', blogRouter);");
+      expect(lines).toContain("router.use('/order', orderRouter);");
+      expect(lines).not.toContain("controller.");
+      expect(lines).not.toMatch(/router\.(get|post|put|delete|patch)\(/);
+    });
+
+    test("appends middleware ids to each mount", async () => {
+      await simpleArch("blog", "None");
+      const { entries } = buildWiringEntries([{ name: "blog", architecture: "simple" }], {
+        root: root(),
+      });
+
+      const lines = renderRouteLines(entries, [
+        { id: "authMiddleware", relRequireFromRoutes: "../shared/middlewares/auth.middleware.js" },
+      ]);
+
+      expect(lines).toContain(
+        "const authMiddleware = require('../shared/middlewares/auth.middleware.js');"
+      );
+      expect(lines).toContain("router.use('/blog', blogRouter, authMiddleware);");
+    });
+
+    test("returns an empty body when there is nothing to wire", () => {
+      expect(renderRouteLines([], [])).toBe("");
+    });
+  });
+
+  describe("buildMiddlewareEntries", () => {
+    test("includes only middleware files that exist on disk", async () => {
+      await createMiddleware("auth", undefined, { root: root() });
+
+      const { entries, skipped } = buildMiddlewareEntries(["auth", "irrelevant"], {
+        root: root(),
+      });
+
+      expect(entries).toEqual([
+        {
+          id: "authMiddleware",
+          name: "auth",
+          relRequireFromRoutes: "../shared/middlewares/auth.middleware.js",
+        },
+      ]);
+      expect(skipped).toEqual([
+        {
+          name: "irrelevant",
+          reason: "middleware tidak ditemukan: app/shared/middlewares/irrelevant.middleware.js",
+        },
+      ]);
+    });
+  });
 });
 
-afterEach(() => {
-  jest.restoreAllMocks();
-});
+describe("integrateCommand regression guards", () => {
+  test("wires a simple-architecture module by mount, never by controller reference (F-3)", async () => {
+    await simpleArch("payment", "None");
 
-describe("Module Generator (v2 flow)", () => {
-  test("dispatches to modularArch + Prisma ORM when selected", async () => {
-    mockAnswers();
-    await generateModule();
+    const result = await integrateCommand({ root: root() });
 
-    expect(modularArch).toHaveBeenCalledWith("user-profile", "Prisma");
-    expect(prismaORM).toHaveBeenCalledWith("user-profile");
-    expect(installOrmPackages).toHaveBeenCalledWith("Prisma");
+    expect(result.ok).toBe(true);
+    expect(result.created).toContain("app/routes/index.js");
+
+    const router = read("app/routes/index.js");
+    expect(router).toContain("const paymentRouter = require('../modules/payment/payment.router.js');");
+    expect(router).toContain("router.use('/payment', paymentRouter);");
+    expect(router).not.toContain("controller.");
+    expect(router).toContain("module.exports = router;");
   });
 
-  test('REGRESSION B1: no-ORM answers pass "None" instead of crashing', async () => {
-    mockAnswers({ useORM: "No" });
+  test("regenerating only rewrites the marker region and keeps every byte around it", async () => {
+    await modularArch("order", "None");
+    write(
+      "app/routes/index.js",
+      `const express = require('express');
+const router = express.Router();
 
-    await expect(generateModule()).resolves.not.toThrow();
+// USER CODE ABOVE
+/* rakitin:routes:start */
+// stale
+/* rakitin:routes:end */
+// USER CODE BELOW
+module.exports = router;
+`
+    );
 
-    // Arch layer still receives the resolved ORM choice
-    expect(simpleArch).not.toHaveBeenCalledWith(expect.anything(), undefined);
-    expect(installOrmPackages).not.toHaveBeenCalled();
+    const first = await integrateCommand({ root: root() });
+    expect(first.data.action).toBe("markers-regenerated");
+
+    const regenerated = read("app/routes/index.js");
+    expect(regenerated).toContain("// USER CODE ABOVE");
+    expect(regenerated).toContain("// USER CODE BELOW");
+    expect(regenerated).toContain(
+      "const orderRouter = require('../modules/order/routes/order.router.js');"
+    );
+    expect(regenerated).not.toContain("// stale");
+
+    // The user's pre-rakitin bytes are preserved in a unique backup.
+    expect(fs.existsSync(abs("app/routes/index.js.bak"))).toBe(true);
+    expect(read("app/routes/index.js.bak")).toContain("// stale");
+
+    const before = regenerated.slice(
+      0,
+      regenerated.indexOf("/* rakitin:routes:start */")
+    );
+    const after = regenerated.slice(
+      regenerated.indexOf("/* rakitin:routes:end */") + "/* rakitin:routes:end */".length
+    );
+    await integrateCommand({ root: root() });
+    const second = read("app/routes/index.js");
+
+    expect(second.slice(0, second.indexOf("/* rakitin:routes:start */"))).toBe(before);
+    expect(
+      second.slice(second.indexOf("/* rakitin:routes:end */") + "/* rakitin:routes:end */".length)
+    ).toBe(after);
   });
 
-  test("simple architecture routes through simpleArch", async () => {
-    mockAnswers({ architecture: "Simple", orm: "Sequelize" });
-    await generateModule();
+  test("reports a module with a missing router file in skipped[] and stays ok (F-14)", () => {
+    write("app/modules/broken/index.js", "// module dir without a router\n");
 
-    expect(simpleArch).toHaveBeenCalledWith("user-profile", "Sequelize");
-    expect(sequelizeORM).toHaveBeenCalled();
-    expect(modularArch).not.toHaveBeenCalled();
-  });
-
-  test("TypeORM selection installs TypeORM packages", async () => {
-    mockAnswers({ orm: "TypeORM" });
-    await generateModule();
-
-    expect(typeormORM).toHaveBeenCalledWith("user-profile", "Modular");
-    expect(installOrmPackages).toHaveBeenCalledWith("TypeORM");
-  });
-
-  test("auto-integrate hands off to integrateAutoRouter with router architecture", async () => {
-    mockAnswers({ autoIntegrateRouter: true, routerArchitecture: "modular" });
-    await generateModule().catch((e) => {
-      throw new Error(`generateModule rejected unexpectedly: ${e.message}`);
+    return integrateCommand({ root: root() }).then((result) => {
+      expect(result.ok).toBe(false); // nothing wireable -> explicit no-op envelope
+      expect(result.message).toMatch(/Tidak ada modul valid/);
+      expect(result.data.skippedModules).toHaveLength(1);
     });
-
-    expect(integrateAutoRouter).toHaveBeenCalledWith({
-      autoDetect: true,
-      architecture: "modular",
-      middlewares: [],
-    });
-  });
-
-  test("invalid architecture aborts before file generation", async () => {
-    validationUtils.validateArchitecture.mockReturnValueOnce({
-      isValid: false,
-      message: "Arsitektur tidak valid",
-    });
-    mockAnswers();
-
-    // The contract: whichever way the error surfaces (thrown via
-    // handleError, or swallowed by it), NO file generator may run.
-    try {
-      await generateModule();
-      expect(modularArch).not.toHaveBeenCalled();
-    } catch {
-      expect(modularArch).not.toHaveBeenCalled();
-    }
   });
 });
